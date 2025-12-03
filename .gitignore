@@ -52,3 +52,13 @@ venv.bak/
 # IDEs
 .vscode/
 .idea/
+
+# Secrets
+token.txt
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

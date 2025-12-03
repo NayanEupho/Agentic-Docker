@@ -14,9 +14,11 @@ This orchestrates the communication between all system components.
 
 # Import required modules from our project
 from .llm.ollama_client import get_tool_call, ensure_model_exists
-from .mcp.client import call_tool, test_connection
+from .mcp.client import call_tool, call_k8s_tool, call_remote_k8s_tool, test_connection, test_k8s_connection, test_remote_k8s_connection
 from .safety import confirm_action_auto
 from .tools import get_tools_schema
+from .k8s_tools import get_k8s_tools_schema
+from .k8s_tools.remote_k8s_tools import get_remote_k8s_tools_schema
 # Import typing utilities for type hints
 from typing import Dict, Any
 
@@ -37,65 +39,43 @@ def process_query(query: str) -> str:
     Returns:
         str: Formatted result message for the user
     """
-    # Step 1: Validate system readiness
-    print("🔍 Checking system readiness...")
+    # 1. Get all available tools schemas
+    docker_tools_schema = get_tools_schema()
+    k8s_tools_schema = get_k8s_tools_schema()
+    remote_k8s_tools_schema = get_remote_k8s_tools_schema()
     
-    # Check if LLM model is available
-    if not ensure_model_exists():
-        return "❌ LLM model not available. Please install the required model with 'ollama pull phi3:mini'"
+    # Combine all schemas for the LLM
+    all_tools_schema = docker_tools_schema + k8s_tools_schema + remote_k8s_tools_schema
     
-    # Check if MCP server is running
-    if not test_connection():
-        return "❌ MCP server not running. Please start it with 'agentic-docker server'"
+    # 2. Ask LLM to choose a tool
+    tool_call = get_tool_call(query, all_tools_schema)
     
-    print("✅ System ready. Processing query...")
-    
-    # Step 2: Get available tools schema for the LLM
-    tools_schema = get_tools_schema()
-    
-    # Step 3: Ask LLM to choose tool and parameters
-    print(f"🤖 Querying LLM for: '{query}'")
-    tool_call = get_tool_call(query, tools_schema)
-    
-    # Handle cases where LLM couldn't understand the query
     if not tool_call:
-        return "❌ Sorry, I couldn't understand your request or find an appropriate tool for it."
+        return "❌ I couldn't understand that request or map it to a valid tool. Please try again."
     
-    # Extract tool name and arguments from LLM response
     tool_name = tool_call["name"]
     arguments = tool_call["arguments"]
     
-    print(f"🎯 Selected tool: {tool_name}")
-    print(f"   Arguments: {arguments}")
-    
-    # Step 4: Apply safety checks for dangerous operations
-    print(f"🛡️  Checking safety requirements...")
+    # 3. Safety Check
     if not confirm_action_auto(tool_name, arguments):
-        return "🛑 Action cancelled by user."
+        return "❌ Operation cancelled by user."
     
-    # Step 5: Execute the tool via MCP client
-    print(f"🚀 Executing tool via MCP server...")
-    result = call_tool(tool_name, arguments)
+    # 4. Execute the tool via appropriate MCP client
+    print(f"[INFO] Executing tool: {tool_name}")
     
-    # Step 6: Format and return the result
-    print(f"📊 Processing result...")
-    return format_result(tool_name, result)
-
-def format_result(tool_name: str, result: Dict[str, Any]) -> str:
-    """
-    Format the tool execution result into a user-friendly message.
+    result = None
     
-    This function takes the raw result from the tool execution and formats
-    it in a way that's easy for users to understand, with appropriate
-    success/failure messages and structured data display.
+    # Determine which MCP server to call based on tool name prefix or registry
+    if tool_name.startswith("remote_k8s_"):
+        result = call_remote_k8s_tool(tool_name, arguments)
+    elif tool_name.startswith("k8s_"):
+        result = call_k8s_tool(tool_name, arguments)
+    else:
+        # Default to Docker tools
+        result = call_tool(tool_name, arguments)
     
-    Args:
-        tool_name (str): The name of the tool that was executed
-        result (Dict[str, Any]): The raw result from the tool execution
-        
-    Returns:
-        str: Formatted result message for the user
-    """
+    # 5. Format and return the result
+    
     # Check if the operation was successful
     if result.get("success"):
         # Handle successful results differently based on the tool
@@ -131,6 +111,46 @@ def format_result(tool_name: str, result: Dict[str, Any]) -> str:
             container_name = result.get("name", "unknown")
             message = result.get("message", f"Container {container_name} stopped successfully.")
             return f"✅ {message}\n   Container ID: {container_id}\n   Name: {container_name}"
+            
+        elif tool_name == "k8s_list_pods" or tool_name == "remote_k8s_list_pods":
+            # Special formatting for pod listing
+            pods = result.get("pods", [])
+            count = result.get("count", 0)
+            namespace = result.get("namespace", "unknown")
+            cluster_type = "REMOTE" if tool_name.startswith("remote_") else "LOCAL"
+            
+            if not pods:
+                return f"✅ Success! No pods found in namespace '{namespace}' ({cluster_type})."
+            
+            formatted_lines = []
+            formatted_lines.append(f"✅ Success! Found {count} pod(s) in namespace '{namespace}' ({cluster_type}):")
+            
+            for pod in pods:
+                status_emoji = "🟢" if pod["phase"] == "Running" else "🔴"
+                ready = pod.get("ready", "N/A")
+                line = f"   {status_emoji} {pod['name']} ({pod['pod_ip']}) - {pod['phase']} [Ready: {ready}]"
+                formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
+            
+        elif tool_name == "k8s_list_nodes" or tool_name == "remote_k8s_list_nodes":
+            # Special formatting for node listing
+            nodes = result.get("nodes", [])
+            count = result.get("count", 0)
+            cluster_type = "REMOTE" if tool_name.startswith("remote_") else "LOCAL"
+            
+            if not nodes:
+                return f"✅ Success! No nodes found ({cluster_type})."
+            
+            formatted_lines = []
+            formatted_lines.append(f"✅ Success! Found {count} node(s) ({cluster_type}):")
+            
+            for node in nodes:
+                status_emoji = "🟢" if node["status"] == "Ready" else "🔴"
+                line = f"   {status_emoji} {node['name']} ({node['internal_ip']}) - {node['status']} [Roles: {node['roles']}]"
+                formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
         
         else:
             # Generic success message for other tools
@@ -199,9 +219,13 @@ def get_system_status() -> Dict[str, Any]:
     
     llm_available = ensure_model_exists()
     mcp_available = test_connection()
-    # FIXED: get_tools_schema() returns list of dicts, not tool objects
-    tools_schema = get_tools_schema()
-    available_tools = [tool['name'] for tool in tools_schema]
+    k8s_mcp_available = test_k8s_connection()
+    remote_k8s_available = test_remote_k8s_connection()
+    
+    # Get tools schemas
+    docker_tools = [tool['name'] for tool in get_tools_schema()]
+    k8s_tools = [tool['name'] for tool in get_k8s_tools_schema()]
+    remote_k8s_tools = [tool['name'] for tool in get_remote_k8s_tools_schema()]
     
     return {
         "llm": {
@@ -209,13 +233,24 @@ def get_system_status() -> Dict[str, Any]:
             # Use the actual configured model name from ollama_client.py, not hardcoded
             "model": MODEL
         },
-        "mcp_server": {
+        "docker_mcp_server": {
             "available": mcp_available,
             "url": "http://127.0.0.1:8080"
         },
+        "k8s_mcp_server": {
+            "available": k8s_mcp_available,
+            "url": "http://127.0.0.1:8081"
+        },
+        "remote_k8s_mcp_server": {
+            "available": remote_k8s_available,
+            "url": "http://127.0.0.1:8082"
+        },
         "tools": {
-            "available": available_tools,
-            "count": len(available_tools)
+            "available": docker_tools + k8s_tools + remote_k8s_tools,
+            "count": len(docker_tools) + len(k8s_tools) + len(remote_k8s_tools),
+            "docker": docker_tools,
+            "kubernetes": k8s_tools,
+            "remote_kubernetes": remote_k8s_tools
         }
     }
 
@@ -237,27 +272,11 @@ def process_query_with_status_check(query: str) -> str:
     if not status["llm"]["available"]:
         return f"❌ LLM not available. Please ensure Ollama is running and model '{status['llm']['model']}' is installed."
     
-    if not status["mcp_server"]["available"]:
-        return f"❌ MCP server not available. Please start it with 'agentic-docker server'."
+    if not status["docker_mcp_server"]["available"] and not status["k8s_mcp_server"]["available"] and not status["remote_k8s_mcp_server"]["available"]:
+         return f"❌ No MCP servers available. Please start at least one server."
     
-    if not status["tools"]["available"]:
+    if status["tools"]["count"] == 0:
         return f"❌ No tools available. Please check your tool configuration."
     
     # If all systems are go, process the query normally
     return process_query_with_error_handling(query)
-
-# Example workflow:
-"""
-User query: "List all containers"
-1. process_query("List all containers")
-2. get_tool_call() → {"name": "docker_list_containers", "arguments": {}}
-3. confirm_action_auto() → True (no confirmation needed for list)
-4. call_tool() → {"success": True, "containers": [...], "count": 2}
-5. format_result() → "✅ Success! Found 2 container(s):..."
-"""
-
-# The agent is the "brain" that coordinates all components:
-# - LLM Client: Decides which tool to use
-# - Safety Layer: Confirms dangerous operations  
-# - MCP Client: Executes the chosen tool
-# - Formatting: Makes results user-friendly

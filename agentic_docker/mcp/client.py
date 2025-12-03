@@ -17,6 +17,10 @@ from typing import Dict, Any, Optional
 # Configuration: The URL where the MCP server is running
 # This should match the server's host and port
 MCP_URL = "http://127.0.0.1:8080"
+# Kubernetes MCP server (for k8s_* tools)
+K8S_MCP_URL = "http://127.0.0.1:8081"
+# Remote Kubernetes MCP server (for remote_k8s_* tools)
+REMOTE_K8S_MCP_URL = "http://127.0.0.1:8082"
 
 def call_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -156,6 +160,160 @@ def get_available_tools() -> Optional[list]:
     # This would be implemented in a full MCP server as a discovery endpoint
     # For our implementation, the tools list is in the tools registry
     return None
+
+def call_k8s_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Send a JSON-RPC request to the Kubernetes MCP server to execute a specific K8s tool.
+    
+    This function is similar to call_tool but routes to the K8s MCP server.
+    
+    Args:
+        tool_name (str): The name of the K8s tool to execute (e.g., "k8s_list_pods")
+        arguments (Dict[str, Any]): The parameters to pass to the tool
+        
+    Returns:
+        Dict[str, Any]: The result from the tool execution
+    """
+    payload = {
+        "jsonrpc": "2.0",
+        "method": tool_name,
+        "params": arguments,
+        "id": 1
+    }
+    
+    try:
+        response = requests.post(
+            url=K8S_MCP_URL,
+            json=payload,
+            timeout=30,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "error": result["error"],
+                "original_response": result
+            }
+        
+        return result.get("result", {
+            "success": False,
+            "error": "No result returned from K8s server"
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return {
+            "success": False,
+            "error": f"Cannot connect to K8s MCP server at {K8S_MCP_URL}. "
+                    "Make sure the server is running with 'agentic-docker k8s-server'."
+        }
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "error": f"Request to K8s MCP server timed out after 30 seconds"
+        }
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "error": f"Network error occurred: {str(e)}"
+        }
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "error": f"K8s server returned invalid JSON response: {response.text}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error occurred: {str(e)}"
+        }
+
+def test_k8s_connection() -> bool:
+    """
+    Test if the Kubernetes MCP server is accessible.
+    
+    Returns:
+        bool: True if the K8s server is accessible, False otherwise
+    """
+    try:
+        response = call_k8s_tool("k8s_list_pods", {"namespace": "default"})
+        return True
+    except Exception:
+        return False
+
+def call_remote_k8s_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Send a JSON-RPC request to the Remote Kubernetes MCP server.
+    """
+    payload = {
+        "jsonrpc": "2.0",
+        "method": tool_name,
+        "params": arguments,
+        "id": 1
+    }
+    
+    try:
+        response = requests.post(
+            url=REMOTE_K8S_MCP_URL,
+            json=payload,
+            timeout=30,
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "error": result["error"],
+                "original_response": result
+            }
+        
+        return result.get("result", {
+            "success": False,
+            "error": "No result returned from Remote K8s server"
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return {
+            "success": False,
+            "error": f"Cannot connect to Remote K8s MCP server at {REMOTE_K8S_MCP_URL}. "
+                    "Make sure the server is running."
+        }
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "error": f"Request to Remote K8s MCP server timed out after 30 seconds"
+        }
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "error": f"Network error occurred: {str(e)}"
+        }
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "error": f"Remote K8s server returned invalid JSON response: {response.text}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error occurred: {str(e)}"
+        }
+
+def test_remote_k8s_connection() -> bool:
+    """
+    Test if the Remote Kubernetes MCP server is accessible.
+    """
+    try:
+        response = call_remote_k8s_tool("remote_k8s_list_pods", {"namespace": "default"})
+        return True
+    except Exception:
+        return False
 
 # Example of what a JSON-RPC request looks like:
 """

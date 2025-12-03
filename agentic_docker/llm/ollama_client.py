@@ -98,7 +98,11 @@ User request: "{user_query}"
         tool_call, end_idx = decoder.raw_decode(content)
         
         # Validate that the response has the required structure
-        if "name" in tool_call and "arguments" in tool_call:
+        if "name" in tool_call:
+            # Ensure arguments key exists, default to empty dict if missing
+            if "arguments" not in tool_call:
+                tool_call["arguments"] = {}
+            
             # Additional validation: ensure arguments is a dictionary
             if isinstance(tool_call["arguments"], dict):
                 return tool_call
