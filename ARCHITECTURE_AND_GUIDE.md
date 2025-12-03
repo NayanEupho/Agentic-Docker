@@ -44,11 +44,11 @@ The system is designed as a **Multi-MCP Architecture**. This means we have separ
 
 ```mermaid
 graph TD
-    User[User Input] -->|1. Natural Language| CLI[CLI (Typer)]
+    User[User Input] -->|1. Natural Language| CLI["CLI (Typer)"]
     CLI -->|2. Pass Query| Agent[Agent Orchestrator]
     
     subgraph "The Brain"
-        Agent -->|3. Get Tool Decision| LLM[Ollama (phi3:mini)]
+        Agent -->|3. Get Tool Decision| LLM["Ollama (phi3:mini)"]
         LLM -->|4. Return Tool Name & Args| Agent
     end
     

@@ -32,18 +32,18 @@ An AI-powered Docker assistant that understands natural language commands. This 
 
 ```mermaid
 graph TD
-    User[User] -->|Natural Language Command| CLI[CLI (Typer)]
+    User[User] -->|Natural Language Command| CLI["CLI (Typer)"]
     CLI -->|Query| Agent[Agent Orchestrator]
-    Agent -->|1. Select Tool| LLM[LLM (Ollama)]
+    Agent -->|1. Select Tool| LLM["LLM (Ollama)"]
     LLM -->|Tool Call JSON| Agent
     Agent -->|2. Safety Check| Safety[Safety Layer]
     Safety -->|Confirmation?| User
     Safety -->|Approved| MCP_Client[MCP Client]
     
     subgraph Routing Logic
-        MCP_Client -->|docker_*| DockerServer[Docker MCP Server (8080)]
-        MCP_Client -->|k8s_*| LocalK8sServer[Local K8s MCP Server (8081)]
-        MCP_Client -->|remote_k8s_*| RemoteK8sServer[Remote K8s MCP Server (8082)]
+        MCP_Client -->|docker_*| DockerServer["Docker MCP Server (8080)"]
+        MCP_Client -->|k8s_*| LocalK8sServer["Local K8s MCP Server (8081)"]
+        MCP_Client -->|remote_k8s_*| RemoteK8sServer["Remote K8s MCP Server (8082)"]
     end
     
     DockerServer -->|Execute| Docker[Docker Engine]
