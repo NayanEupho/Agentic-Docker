@@ -4,23 +4,23 @@ Agent Orchestrator
 
 This is the central coordinator that manages the entire flow:
 1. Takes user query in natural language
-2. Asks LLM to select appropriate tool and parameters
+2. Asks LLM to select appropriate tool(s) and parameters
 3. Applies safety checks for dangerous operations
-4. Executes the tool via MCP client
-5. Formats and returns the result to the user
+4. Executes the tool(s) via MCP client
+5. Formats and returns the result(s) to the user
 
 This orchestrates the communication between all system components.
 """
 
 # Import required modules from our project
-from .llm.ollama_client import get_tool_call, ensure_model_exists
+from .llm.ollama_client import get_tool_calls, ensure_model_exists
 from .mcp.client import call_tool, call_k8s_tool, call_remote_k8s_tool, test_connection, test_k8s_connection, test_remote_k8s_connection
 from .safety import confirm_action_auto
 from .tools import get_tools_schema
 from .k8s_tools import get_k8s_tools_schema
 from .k8s_tools.remote_k8s_tools import get_remote_k8s_tools_schema
 # Import typing utilities for type hints
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 def process_query(query: str) -> str:
     """
@@ -28,10 +28,10 @@ def process_query(query: str) -> str:
     
     This function orchestrates the entire workflow:
     1. Validates system readiness (LLM and MCP server)
-    2. Asks LLM to choose appropriate tool and parameters
+    2. Asks LLM to choose appropriate tool(s) and parameters
     3. Applies safety confirmation for dangerous operations
-    4. Executes the tool via MCP client
-    5. Formats and returns the result
+    4. Executes the tool(s) via MCP client
+    5. Formats and returns the result(s)
     
     Args:
         query (str): The user's natural language request
@@ -47,35 +47,50 @@ def process_query(query: str) -> str:
     # Combine all schemas for the LLM
     all_tools_schema = docker_tools_schema + k8s_tools_schema + remote_k8s_tools_schema
     
-    # 2. Ask LLM to choose a tool
-    tool_call = get_tool_call(query, all_tools_schema)
+    # 2. Ask LLM to choose tool(s)
+    # Now returns a LIST of tool calls
+    tool_calls = get_tool_calls(query, all_tools_schema)
     
-    if not tool_call:
+    if not tool_calls:
         return "❌ I couldn't understand that request or map it to a valid tool. Please try again."
     
-    tool_name = tool_call["name"]
-    arguments = tool_call["arguments"]
+    final_results = []
     
-    # 3. Safety Check
-    if not confirm_action_auto(tool_name, arguments):
-        return "❌ Operation cancelled by user."
-    
-    # 4. Execute the tool via appropriate MCP client
-    print(f"[INFO] Executing tool: {tool_name}")
-    
-    result = None
-    
-    # Determine which MCP server to call based on tool name prefix or registry
-    if tool_name.startswith("remote_k8s_"):
-        result = call_remote_k8s_tool(tool_name, arguments)
-    elif tool_name.startswith("k8s_"):
-        result = call_k8s_tool(tool_name, arguments)
-    else:
-        # Default to Docker tools
-        result = call_tool(tool_name, arguments)
-    
-    # 5. Format and return the result
-    
+    # Iterate through each tool call in the chain
+    for index, tool_call in enumerate(tool_calls):
+        tool_name = tool_call["name"]
+        arguments = tool_call["arguments"]
+        
+        # 3. Safety Check
+        if not confirm_action_auto(tool_name, arguments):
+            final_results.append(f"❌ Operation '{tool_name}' cancelled by user.")
+            continue
+        
+        # 4. Execute the tool via appropriate MCP client
+        print(f"[INFO] Executing tool {index + 1}/{len(tool_calls)}: {tool_name}")
+        
+        result = None
+        
+        # Determine which MCP server to call based on tool name prefix or registry
+        if tool_name.startswith("remote_k8s_"):
+            result = call_remote_k8s_tool(tool_name, arguments)
+        elif tool_name.startswith("k8s_"):
+            result = call_k8s_tool(tool_name, arguments)
+        else:
+            # Default to Docker tools
+            result = call_tool(tool_name, arguments)
+            
+        # 5. Format the result
+        formatted_result = format_tool_result(tool_name, result)
+        final_results.append(formatted_result)
+        
+    # Combine all results into a single string
+    return "\n\n" + "-"*40 + "\n\n".join(final_results)
+
+def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
+    """
+    Helper function to format the result of a single tool execution.
+    """
     # Check if the operation was successful
     if result.get("success"):
         # Handle successful results differently based on the tool
@@ -149,6 +164,135 @@ def process_query(query: str) -> str:
                 status_emoji = "🟢" if node["status"] == "Ready" else "🔴"
                 line = f"   {status_emoji} {node['name']} ({node['internal_ip']}) - {node['status']} [Roles: {node['roles']}]"
                 formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
+
+        elif tool_name == "remote_k8s_list_namespaces":
+            # Special formatting for namespace listing
+            namespaces = result.get("namespaces", [])
+            count = result.get("count", 0)
+            
+            if not namespaces:
+                return "✅ Success! No namespaces found in REMOTE cluster."
+            
+            formatted_lines = []
+            formatted_lines.append(f"✅ Success! Found {count} namespace(s) in REMOTE cluster:")
+            
+            for ns in namespaces:
+                status_emoji = "🟢" if ns["status"] == "Active" else "🔴"
+                line = f"   {status_emoji} {ns['name']} - {ns['status']} [Created: {ns['creation_timestamp']}]"
+                formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
+
+        elif tool_name == "remote_k8s_find_pod_namespace":
+            # Special formatting for finding pod namespaces
+            pod_locations = result.get("pod_locations", {})
+            
+            if not pod_locations:
+                return "✅ Success! No pods queried."
+            
+            formatted_lines = []
+            formatted_lines.append("✅ Success! Pod Location Results (REMOTE):")
+            
+            for pod_name, location in pod_locations.items():
+                if location == "Not Found":
+                    line = f"   ❌ {pod_name}: Not Found"
+                else:
+                    # location is a list of namespaces
+                    ns_str = ", ".join(location)
+                    line = f"   📍 {pod_name}: Found in namespace(s) -> {ns_str}"
+                formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
+
+        elif tool_name == "remote_k8s_get_resources_ips":
+            # Special formatting for IP retrieval
+            ips = result.get("ips", {})
+            
+            if not ips:
+                return "✅ Success! No resources queried."
+            
+            formatted_lines = []
+            formatted_lines.append("✅ Success! Resource IP Results (REMOTE):")
+            
+            for name, info in ips.items():
+                if info == "Not Found":
+                    line = f"   ❌ {name}: Not Found"
+                else:
+                    # Check if it's a pod or node based on keys
+                    if "pod_ip" in info:
+                        # It's a pod
+                        ports = ", ".join(info.get("ports", []))
+                        line = f"   🔹 {name}:\n      - Pod IP: {info.get('pod_ip')}\n      - Host IP: {info.get('host_ip')}\n      - Ports: {ports if ports else 'None'}"
+                    else:
+                        # It's a node (or generic)
+                        details = []
+                        for k, v in info.items():
+                            details.append(f"{k}: {v}")
+                        details_str = "\n      - ".join(details)
+                        line = f"   💻 {name}:\n      - {details_str}"
+                formatted_lines.append(line)
+                
+            return "\n".join(formatted_lines)
+
+        elif tool_name == "remote_k8s_list_deployments":
+            # Special formatting for deployment listing
+            deployments = result.get("deployments", [])
+            count = result.get("count", 0)
+            scope = result.get("scope", "unknown scope")
+            
+            if not deployments:
+                return f"✅ Success! No deployments found in {scope}."
+            
+            formatted_lines = []
+            formatted_lines.append(f"✅ Success! Found {count} deployment(s) in {scope}:")
+            
+            # Header
+            if "all namespaces" in scope:
+                 formatted_lines.append(f"   {'NAMESPACE':<15} {'NAME':<30} {'READY':<10} {'UP-TO-DATE':<12} {'AVAILABLE':<10} {'AGE':<20}")
+                 for dep in deployments:
+                    name = dep.get('name', 'N/A')
+                    ns = dep.get('namespace', 'N/A')
+                    ready = f"{dep.get('ready_replicas', 0)}/{dep.get('replicas', 0)}"
+                    updated = str(dep.get('updated_replicas', 0))
+                    available = str(dep.get('available_replicas', 0))
+                    age = dep.get('creation_timestamp', 'N/A')
+                    formatted_lines.append(f"   {ns:<15} {name:<30} {ready:<10} {updated:<12} {available:<10} {age:<20}")
+            else:
+                formatted_lines.append(f"   {'NAME':<30} {'READY':<10} {'UP-TO-DATE':<12} {'AVAILABLE':<10} {'AGE':<20}")
+                for dep in deployments:
+                    name = dep.get('name', 'N/A')
+                    ready = f"{dep.get('ready_replicas', 0)}/{dep.get('replicas', 0)}"
+                    updated = str(dep.get('updated_replicas', 0))
+                    available = str(dep.get('available_replicas', 0))
+                    age = dep.get('creation_timestamp', 'N/A')
+                    formatted_lines.append(f"   {name:<30} {ready:<10} {updated:<12} {available:<10} {age:<20}")
+                
+            return "\n".join(formatted_lines)
+
+        elif tool_name == "remote_k8s_describe_deployment":
+            # Special formatting for deployment description
+            dep = result.get("deployment", {})
+            
+            if not dep:
+                return "✅ Success! Deployment not found."
+            
+            formatted_lines = []
+            formatted_lines.append(f"✅ Deployment Details: {dep.get('name')} (Namespace: {dep.get('namespace')})")
+            formatted_lines.append(f"   📅 Created: {dep.get('creation_timestamp')}")
+            formatted_lines.append(f"   🔢 Replicas: {dep.get('replicas_ready')}/{dep.get('replicas_desired')} ready ({dep.get('replicas_updated')} updated, {dep.get('replicas_available')} available)")
+            formatted_lines.append(f"   🔄 Strategy: {dep.get('strategy')}")
+            
+            formatted_lines.append("   📦 Containers:")
+            for container in dep.get('containers', []):
+                ports = ", ".join([str(p) for p in container.get('ports', [])])
+                formatted_lines.append(f"      - {container.get('name')} (Image: {container.get('image')}) [Ports: {ports if ports else 'None'}]")
+            
+            formatted_lines.append("   🚦 Conditions:")
+            for cond in dep.get('conditions', []):
+                status_icon = "🟢" if cond.get('status') == "True" else "🔴"
+                formatted_lines.append(f"      {status_icon} {cond.get('type')}: {cond.get('message')}")
                 
             return "\n".join(formatted_lines)
         

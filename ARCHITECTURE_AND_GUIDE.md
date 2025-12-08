@@ -157,7 +157,54 @@ The Agent receives the tool name `k8s_list_pods`.
 
 ---
 
-## 5. Detailed Component Breakdown
+## 5. Command Chaining (Multi-Step Execution)
+
+One of the advanced features of Agentic Docker is the ability to handle **Command Chaining**. This allows the user to perform multiple actions in a single natural language query.
+
+> **Example:** "Start an nginx container and then list all pods in the default namespace."
+
+### Implementation Strategy: Multi-Tool JSON List
+
+To achieve this without complex iterative loops or multiple LLM round-trips, we implemented **Strategy 1: Multi-Tool JSON List**.
+
+#### 1. Prompt Engineering
+We modified the system prompt in `ollama_client.py` to explicitly instruct the LLM to return a **list** of tool calls if multiple actions are detected.
+
+**Old Prompt Instruction:**
+> "Respond ONLY with a valid JSON object..."
+
+**New Prompt Instruction:**
+> "If the user asks for multiple things, you MUST return a LIST of tool calls... Respond ONLY with a valid JSON LIST of objects..."
+
+#### 2. Response Structure
+Instead of a single JSON object, the LLM now returns:
+```json
+[
+  {
+    "name": "docker_run_container",
+    "arguments": { "image": "nginx" }
+  },
+  {
+    "name": "k8s_list_pods",
+    "arguments": { "namespace": "default" }
+  }
+]
+```
+
+#### 3. Execution Loop
+The `agent.py` orchestrator was updated to handle this list:
+1.  **Parse:** `get_tool_calls` returns a Python list of tool dictionaries.
+2.  **Iterate:** The agent loops through each tool call in order.
+3.  **Execute:** It performs the safety check and MCP execution for the first tool.
+4.  **Accumulate:** The result of the first tool is stored.
+5.  **Continue:** It proceeds to the second tool, and so on.
+6.  **Report:** Finally, it combines all results into a single formatted response for the user.
+
+This approach is efficient because it requires only **one LLM inference call** to plan the entire sequence of actions.
+
+---
+
+## 6. Detailed Component Breakdown
 
 ### 1. The CLI (`cli.py`)
 - **Role:** The entry point. Uses `typer` to parse command line arguments.
@@ -185,7 +232,7 @@ We run three distinct servers to keep concerns separated. This makes the system 
 
 ---
 
-## 6. Extending the System
+## 7. Extending the System
 
 Want to add a new capability? Here is the lifecycle of adding a new tool:
 
@@ -197,7 +244,7 @@ Want to add a new capability? Here is the lifecycle of adding a new tool:
 
 ---
 
-## 7. Troubleshooting Common Issues
+## 8. Troubleshooting Common Issues
 
 - **"I ask for remote pods but it lists local ones"**
   - **Cause:** The LLM might be confused.

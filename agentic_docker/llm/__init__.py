@@ -8,11 +8,11 @@ for import from the parent package.
 """
 
 # Import key components from the LLM subpackage
-from .ollama_client import get_tool_call, test_llm_connection, ensure_model_exists, list_available_models
+from .ollama_client import get_tool_calls, test_llm_connection, ensure_model_exists, list_available_models
 
 # Define what gets imported when someone does "from agentic_docker.llm import *"
 __all__ = [
-    "get_tool_call",
+    "get_tool_calls",
     "test_llm_connection", 
     "ensure_model_exists",
     "list_available_models"
@@ -37,7 +37,7 @@ def get_llm_info():
 
 # Example usage:
 """
-from agentic_docker.llm import get_tool_call
+from agentic_docker.llm import get_tool_calls
 tools_schema = [...]  # Your tools schema
-tool_call = get_tool_call("Start nginx on port 8080", tools_schema)
+tool_calls = get_tool_calls("Start nginx on port 8080", tools_schema)
 """

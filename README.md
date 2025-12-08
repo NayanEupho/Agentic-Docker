@@ -27,6 +27,8 @@ An AI-powered Docker assistant that understands natural language commands. This 
 - **Safety Layer:** Confirmation prompts for potentially destructive operations (e.g., stopping containers).
 - **Modular Design:** Easy to extend with new Docker commands by adding new tool classes.
 - **Docker SDK:** Safe, programmatic interaction with Docker using the official Python SDK, avoiding raw shell command injection.
+- **Remote K8s Management:** Manage deployments (list, describe) on remote Kubernetes clusters.
+- **Command Chaining:** Execute multiple actions in a single query (e.g., "Start nginx and list pods").
 
 ## Architecture
 
@@ -179,7 +181,8 @@ The default LLM model is `phi3:mini`. You can change this by modifying `agentic_
 
 - **Docker:** `"Start nginx"`, `"Stop container my-nginx"`, `"List containers"`
 - **Local K8s:** `"List local nodes"`, `"Show pods in kube-system"`
-- **Remote K8s:** `"List remote nodes"`, `"Show remote pods"`
+- **Remote K8s:** `"List remote nodes"`, `"Show remote pods"`, `"List deployments in default namespace in remote k8s"`, `"Describe deployment my-dep in remote k8s"`
+- **Command Chaining:** `"Start nginx and list all containers"`, `"List local pods and then list remote pods"`
 
 ### Options for `run` Command
 

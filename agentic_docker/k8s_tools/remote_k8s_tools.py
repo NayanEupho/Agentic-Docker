@@ -10,6 +10,13 @@ from typing import List, Dict, Any
 from .k8s_base import K8sTool
 from .k8s_list_pods import K8sListPodsTool
 from .k8s_list_nodes import K8sListNodesTool
+from .remote_k8s_extended_tools import (
+    RemoteK8sListNamespacesTool,
+    RemoteK8sFindPodNamespaceTool,
+    RemoteK8sGetResourcesIPsTool,
+    RemoteK8sListDeploymentsTool,
+    RemoteK8sDescribeDeploymentTool
+)
 
 # We create subclasses to override the name and description
 class RemoteK8sListPodsTool(K8sListPodsTool):
@@ -24,6 +31,11 @@ class RemoteK8sListNodesTool(K8sListNodesTool):
 ALL_REMOTE_K8S_TOOLS: List[K8sTool] = [
     RemoteK8sListPodsTool(),
     RemoteK8sListNodesTool(),
+    RemoteK8sListNamespacesTool(),
+    RemoteK8sFindPodNamespaceTool(),
+    RemoteK8sGetResourcesIPsTool(),
+    RemoteK8sListDeploymentsTool(),
+    RemoteK8sDescribeDeploymentTool(),
 ]
 
 def get_remote_k8s_tools_schema() -> List[dict]:
