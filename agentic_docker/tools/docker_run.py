@@ -11,9 +11,10 @@ import docker
 # Import Pydantic for input validation and data modeling
 from pydantic import BaseModel, Field
 # Import typing utilities for type hints
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 # Import our base Tool class that this tool must inherit from
 from .base import Tool
+from .registry import register_tool
 
 class RunContainerArgs(BaseModel):
     """
@@ -50,6 +51,39 @@ class RunContainerArgs(BaseModel):
         description="Volume mounts in format ['host_path:container_path']"
     )
 
+    from pydantic import model_validator
+    
+    @model_validator(mode='before')
+    @classmethod
+    def parse_json_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            import json
+            # Handle 'ports' being a string "{...}"
+            if "ports" in data and isinstance(data["ports"], str):
+                try:
+                    # If it's literally "{}", just make it empty dict
+                    if data["ports"] == "{}":
+                        data["ports"] = {}
+                    else:
+                        data["ports"] = json.loads(data["ports"])
+                except json.JSONDecodeError:
+                    # If invalid JSON, let Pydantic raise the error normally
+                    pass
+            
+            # Handle 'volumes' being a string "[...]"
+            if "volumes" in data and isinstance(data["volumes"], str):
+                 try:
+                    if data["volumes"] == "{}": # LLM hallucination for empty list
+                        data["volumes"] = []
+                    elif data["volumes"] == "[]":
+                         data["volumes"] = []
+                    else:
+                        data["volumes"] = json.loads(data["volumes"])
+                 except json.JSONDecodeError:
+                    pass
+        return data
+
+@register_tool
 class DockerRunContainerTool(Tool):
     """
     Tool for running new Docker containers.

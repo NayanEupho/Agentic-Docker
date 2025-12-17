@@ -1,29 +1,12 @@
 # requirements.txt
 # Core dependencies for the Agentic Docker project
 
-# CLI framework - makes building command-line tools easy
 typer
-
-# Local LLM client - connects to Ollama to run local models
 ollama
-
-# requirements.txt
-# Core dependencies for the Agentic Docker project
-
-# CLI framework - makes building command-line tools easy
-typer
-
-# Local LLM client - connects to Ollama to run local models
-ollama
-
-# Docker SDK - safe, programmatic access to Docker daemon
 docker
-
-# JSON-RPC implementation - for MCP (Model Context Protocol) communication
 json-rpc
-
-# Data validation and serialization - ensures safe input handling
-pydantic>=2.0
-
-# HTTP library - for making requests to MCP servers
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+httpx
 requests
+dspy-ai

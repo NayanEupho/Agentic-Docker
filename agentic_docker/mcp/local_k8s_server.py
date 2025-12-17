@@ -74,11 +74,11 @@ def create_k8s_tool_handler(tool_name: str):
     # Return the handler function
     return handler
 
-# Automatically register all K8s tools from the registry as JSON-RPC methods
+# Automatically register all local K8s tools from the registry as JSON-RPC methods
 # This loop goes through each K8s tool and creates a handler for it
-from ..k8s_tools import ALL_K8S_TOOLS  # Import here to avoid circular imports
+from ..k8s_tools import ALL_LOCAL_K8S_TOOLS  # Import here to avoid circular imports
 
-for tool in ALL_K8S_TOOLS:
+for tool in ALL_LOCAL_K8S_TOOLS:
     # Create a handler for this specific K8s tool
     handler = create_k8s_tool_handler(tool.name)
     # Register the handler with the JSON-RPC dispatcher
@@ -128,11 +128,53 @@ def start_k8s_mcp_server(host: str = '127.0.0.1', port: int = 8081):
         host (str): The host address to bind to (default: localhost)
         port (int): The port to listen on (default: 8081 for K8s, vs 8080 for Docker)
     """
-    print(f"🚀 Kubernetes MCP Server running at http://{host}:{port}")
-    print(f"   Available K8s tools: {[tool.name for tool in ALL_K8S_TOOLS]}")
+    print(f"🚀 Local Kubernetes MCP Server running at http://{host}:{port}")
+    print(f"   Available K8s tools: {[tool.name for tool in ALL_LOCAL_K8S_TOOLS]}")
     print(f"   Kubernetes API Proxy: http://127.0.0.1:8001")
     print("   Press Ctrl+C to stop the server")
     
+    # Start the Werkzeug development server
+    # This will block and run indefinitely
+    # Function to check if port 8001 is in use
+    import socket
+    import subprocess
+    import time
+    import atexit
+
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('127.0.0.1', port)) == 0
+
+    proxy_process = None
+
+    # Check if kubectl proxy is needed
+    if not is_port_in_use(8001):
+        print("🔌 Starting kubectl proxy on port 8001...")
+        try:
+            # Start kubectl proxy in the background
+            proxy_process = subprocess.Popen(
+                ["kubectl", "proxy", "--port=8001"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("✅ kubectl proxy started.")
+            
+            # Register cleanup to kill proxy when this script exits
+            def cleanup_proxy():
+                if proxy_process:
+                    print("🛑 Stopping kubectl proxy...")
+                    proxy_process.terminate()
+            
+            atexit.register(cleanup_proxy)
+            
+            # Give it a moment to start
+            time.sleep(1)
+        except Exception as e:
+            print(f"⚠️  Failed to start kubectl proxy: {e}")
+            print("   Please ensure 'kubectl' is installed and in your PATH.")
+    else:
+        print("✅ kubectl proxy is already running on port 8001.")
+
     # Start the Werkzeug development server
     # This will block and run indefinitely
     run_simple(

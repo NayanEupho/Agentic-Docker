@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any
 # Import our base Tool class that this tool must inherit from
 from .base import Tool
+from .registry import register_tool
 
 class StopContainerArgs(BaseModel):
     """
@@ -29,6 +30,7 @@ class StopContainerArgs(BaseModel):
         description="The ID or name of the container to stop"
     )
 
+@register_tool
 class DockerStopContainerTool(Tool):
     """
     Tool for stopping Docker containers.

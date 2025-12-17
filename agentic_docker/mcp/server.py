@@ -114,7 +114,10 @@ def application(environ, start_response):
     # Return the response using the WSGI interface
     return wsgi_response(environ, start_response)
 
-def start_mcp_server(host: str = '127.0.0.1', port: int = 8080):
+# Now loaded from settings.py if not provided
+from ..settings import settings
+
+def start_mcp_server(host: str = None, port: int = None):
     """
     Start the MCP server.
     
@@ -122,9 +125,14 @@ def start_mcp_server(host: str = '127.0.0.1', port: int = 8080):
     for JSON-RPC requests. It runs indefinitely until stopped.
     
     Args:
-        host (str): The host address to bind to (default: localhost)
-        port (int): The port to listen on (default: 8080)
+        host (str): The host address to bind to. If None, uses settings.MCP_SERVER_HOST.
+        port (int): The port to listen on. If None, uses settings.DOCKER_PORT.
     """
+    # Use default settings if arguments are not provided
+    if host is None:
+        host = settings.MCP_SERVER_HOST
+    if port is None:
+        port = settings.DOCKER_PORT
     print(f"🚀 MCP Server running at http://{host}:{port}")
     print(f"   Available tools: {[tool.name for tool in ALL_TOOLS]}")
     print("   Press Ctrl+C to stop the server")

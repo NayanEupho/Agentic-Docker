@@ -18,26 +18,7 @@ from .mcp.server import start_mcp_server
 # Import the K8s MCP server function
 from .mcp.local_k8s_server import start_k8s_mcp_server
 # Import system status function
-# Import system status function
 from .agent import get_system_status
-import os
-
-# --- PROXY CONFIGURATION ---
-# Ensure localhost traffic bypasses any conflicting proxies
-# The user (Nayan) has a proxy at 10.20.4.125:3128
-current_no_proxy = os.environ.get("NO_PROXY", "")
-needed_entries = ["localhost", "127.0.0.1"]
-updates = []
-for entry in needed_entries:
-    if entry not in current_no_proxy:
-        updates.append(entry)
-
-if updates:
-    if current_no_proxy:
-        os.environ["NO_PROXY"] = f"{current_no_proxy},{','.join(updates)}"
-    else:
-        os.environ["NO_PROXY"] = ",".join(updates)
-# ---------------------------
 
 # Create the main Typer application instance
 app = typer.Typer(
@@ -155,112 +136,8 @@ def clear_sessions(
         if not force:
             if not typer.confirm("Are you sure you want to DELETE ALL history?"):
                 return
-        if not force:
-            if not typer.confirm("Are you sure you want to DELETE ALL history?"):
-                return
         session_manager.clear_all()
         typer.echo("✅ All history deleted.")
-
-
-@app.command(
-    name="chat",
-    help="Start an interactive chat session with Agentic Docker."
-)
-def chat_command(
-    session_name: Optional[str] = typer.Option(
-        None,
-        "--session",
-        help="Start a NEW session with this specific title/name"
-    ),
-    session_resume: Optional[str] = typer.Option(
-        None,
-        "--session-resume",
-        help="Resume an EXISTING session by ID"
-    ),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show details"),
-):
-    """
-    Start an interactive chat session (REPL).
-    Type 'exit', 'quit', or '/bye' to end the session.
-    """
-    from .database.session_manager import session_manager
-    from .cli_helper import process_command_turn
-    from .settings import settings
-    
-    # 1. Session Setup
-    current_session = None
-    
-    if session_name:
-        # Create NEW named session
-        current_session = session_manager.create_session(title=session_name)
-        typer.echo(f"✨ Created NEW session: '{session_name}' (ID: {current_session.id})")
-        
-    elif session_resume:
-        # Resume EXISTING session
-        current_session = session_manager.get_session(session_resume)
-        if not current_session:
-            typer.echo(f"❌ Session ID '{session_resume}' not found.")
-            raise typer.Exit(code=1)
-        typer.echo(f"🔙 Resumed session: '{current_session.title or session_resume}'")
-        
-        # Re-print last few messages for context?
-        if current_session.messages:
-            last_msg = current_session.messages[-1]
-            typer.echo(f"   Last message ({last_msg.role}): {last_msg.content[:100]}...")
-
-    else:
-        # Default: Create NEW unnamed session
-        current_session = session_manager.create_session()
-        typer.echo(f"✨ Started new chat session (ID: {current_session.id})")
-    
-    # Set as active
-    session_manager.set_active_session(current_session.id)
-    
-    # 2. Welcome Banner
-    host_label = "Remote" if "localhost" not in settings.LLM_HOST and "127.0.0.1" not in settings.LLM_HOST else "Local"
-    typer.echo(f"\n🤖 Interactive Mode [{host_label} | {settings.LLM_MODEL}]")
-    typer.echo("   Type 'exit', 'quit', or Ctrl+C to leave.")
-    typer.echo("-" * 50)
-    
-    # 3. REPL Loop
-    try:
-        import readline  # For history/arrow keys support (on Linux/Mac)
-    except ImportError:
-        pass  # Readline not available (e.g. Windows), history features will be disabled
-    
-    while True:
-        try:
-            # Custom prompt
-            query = typer.prompt(f"[{host_label}] >>>", prompt_suffix=" ")
-            
-            # Check exit conditions
-            if query.strip().lower() in ["exit", "quit", "/bye", "bye"]:
-                typer.echo("👋 Goodbye!")
-                break
-                
-            if not query.strip():
-                continue
-            
-            # Process
-            process_command_turn(
-                session=current_session,
-                query=query,
-                verbose=verbose,
-                no_confirm=False, # Interactive mode usually implies you can confirm, but let's default to standard safety
-                check_llm=False
-            )
-            
-            # Refresh session to ensure we have latest state if needed
-            # (session object is passed by reference-ish but `session_manager` updates DB)
-            # We don't strictly need to reload `current_session` object unless we access properties that change.
-            
-        except KeyboardInterrupt:
-            typer.echo("\n👋 Exiting chat...")
-            break
-        except Exception as e:
-            typer.echo(f"❌ Error: {e}")
-            # Don't crash the loop
-
 
 
 @app.command(
@@ -310,7 +187,6 @@ def run_command(
         safety_module.USE_DETAILED_CONFIRMATION = False
         print("⚠️  Safety confirmation disabled with --no-confirm flag")
     
-    
     if verbose:
         print(f"🔍 Processing query: '{query}'")
         print("📊 System status check...")
@@ -353,15 +229,78 @@ def run_command(
         typer.echo(f"🤖 Context: [{host_label} | {settings.LLM_MODEL}]")
         typer.echo(f"🛑 Session ID: {current_session.id}")
         
-        # Use shared helper
-        from .cli_helper import process_command_turn
-        process_command_turn(
-            session=current_session,
-            query=query,
-            verbose=verbose,
-            no_confirm=no_confirm,
-            check_llm=check_llm
-        )
+        # Log user query
+        session_manager.add_message(current_session.id, "user", query)
+        
+        # Prepare history for the agent
+        # CRITICAL FIX: Truncate large outputs to prevent LLM hallucination/stickiness
+        history = []
+        for msg in current_session.messages:
+            if msg.role == "system":
+                continue
+            
+            content = msg.content
+            # If it's a generic system output, truncate it heavily
+            if "[System Output]" in content and len(content) > 500:
+                content = content[:500] + "... (truncated)"
+            
+            history.append({"role": msg.role, "content": content})
+        
+        # Process the query through our agent with history
+        result_pkg = process_query_with_status_check(query, history, check_llm=check_llm)
+        
+        # --- DISAMBIGUATION HANDLING ---
+        if result_pkg.get("disambiguation_needed"):
+            options = result_pkg.get("options", {})
+            typer.echo("\n🤔 This query is ambiguous. Please select the target:")
+            for key, opt in options.items():
+                typer.echo(f"   [{key}] {opt['label']}")
+            
+            choice = typer.prompt("Enter your choice", default="1")
+            
+            if choice in options:
+                # Update the tool call with the selected tool
+                selected_tool = options[choice]["tool"]
+                tool_calls = result_pkg.get("tool_calls", [])
+                for tc in tool_calls:
+                    if tc["name"] == result_pkg.get("ambiguous_tool"):
+                        tc["name"] = selected_tool
+                
+                # Re-run with the corrected tool (directly execute)
+                from .agent import execute_tool_calls_async
+                import asyncio
+                result_pkg = asyncio.run(execute_tool_calls_async(tool_calls))
+            else:
+                typer.echo("❌ Invalid choice. Aborting.")
+                raise typer.Exit(code=1)
+        
+        # 1. Log Assistant Tool Calls (The "Thought")
+        # This restores the User -> Assistant -> User flow.
+        import json
+        tool_calls = result_pkg.get("tool_calls", [])
+        if tool_calls:
+            # We dump the tool calls as JSON, which is what the LLM ostensibly generated
+            session_manager.add_message(current_session.id, "assistant", json.dumps(tool_calls))
+        
+        # 2. Log System Output (The "Observation")
+        # Log agent response - CLEAN IT FIRST and save as SYSTEM OUTPUT (not assistant)
+        clean_result = result_pkg.get("output", "")
+        if "----------------------------------------" in clean_result:
+             # Strip the separator line and everything before it if it looks like a prefix
+             parts = clean_result.split("----------------------------------------")
+             if len(parts) > 1:
+                 # Usually the last part is the actual content + emoji
+                 clean_result = parts[-1].strip()
+                 # Remove leading emoji/space if present (optional but good)
+                 if clean_result.startswith("🤖") or clean_result.startswith("✅") or clean_result.startswith("❌") or clean_result.startswith("⚠️"):
+                     clean_result = clean_result[1:].strip()
+
+        # Store as "user" with a clear prefix so LLM knows it's system output, not user query
+        # This acts as the "Tool Output" block in typical ReAct/Tool patterns
+        session_manager.add_message(current_session.id, "user", f"[System Output] {clean_result}")
+        
+        # Output the result (keep the fancy formatting for the user)
+        typer.echo(result_pkg.get("output", ""))
         
     except KeyboardInterrupt:
         typer.echo("\n❌ Operation cancelled by user (Ctrl+C)")
@@ -370,6 +309,10 @@ def run_command(
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
         raise typer.Exit(code=1)
+    
+    finally:
+        if no_confirm:
+            safety_module.USE_DETAILED_CONFIRMATION = original_detailed
 
 @app.command(name="server")
 def start_server(host: str = "127.0.0.1", port: int = 8080):
@@ -414,12 +357,23 @@ def start_all_servers():
     import subprocess
     import sys
     import httpx
-    from .llm.ollama_client import list_available_models
+    
+    typer.echo("🚀 Starting ALL MCP Servers...")
+    base_cmd = [sys.executable, "-m", "agentic_docker.cli"]
+    
+    typer.echo("   • Launching Docker Server (Port 8080)...")
+    subprocess.Popen(base_cmd + ["server", "--port", "8080"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    
+    typer.echo("   • Launching Local K8s Server (Port 8081)...")
+    subprocess.Popen(base_cmd + ["k8s-server", "--port", "8081"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    
+    typer.echo("   • Launching Remote K8s Server (Port 8082)...")
+    subprocess.Popen(base_cmd + ["remote-k8s-server", "--port", "8082"], creationflags=subprocess.CREATE_NEW_CONSOLE)
     
     # ---------------------------------------------------------
-    # 1. HOST SELECTION (FIRST)
+    # HOST SELECTION
     # ---------------------------------------------------------
-    typer.echo("🌐 Ollama Host Selection")
+    typer.echo("\n🌐 Ollama Host Selection")
     typer.echo("   Where is your LLM running?")
     typer.echo("   [1] Local (localhost:11434)")
     typer.echo("   [2] Remote / HPC")
@@ -447,56 +401,15 @@ def start_all_servers():
 
     # Save preference
     update_env_file("AGENTIC_LLM_HOST", selected_host)
-
+    
     # ---------------------------------------------------------
-    # 2. MODEL SELECTION (HOT SWAP)
+    # MODEL SELECTION (HOT SWAP)
     # ---------------------------------------------------------
     typer.echo(f"\n🤖 Model Selection (Configured Host: {selected_host})")
-    try:
-        typer.echo(f"   Fetching models from {selected_host}...")
-        models = list_available_models(host=selected_host)
-        
-        if not models:
-            typer.echo("   ⚠️  No models found on this host.")
-        else:
-            typer.echo("\n   Available Models:")
-            models.sort()
-            for i, model in enumerate(models):
-                typer.echo(f"   [{i+1}] {model}")
-            
-            typer.echo(f"   [{len(models)+1}] Custom / Manually Enter")
-
-            model_choice_idx = typer.prompt(f"\n   Select a Model (1-{len(models)+1})", type=int, default=1)
-            
-            if 1 <= model_choice_idx <= len(models):
-                selected_model = models[model_choice_idx-1]
-                typer.echo(f"   🎯 Selected: {selected_model}")
-                update_env_file("AGENTIC_LLM_MODEL", selected_model)
-            else:
-                custom_model = typer.prompt("   Enter model name (e.g., llama3:latest)")
-                update_env_file("AGENTIC_LLM_MODEL", custom_model)
-                
-    except Exception as e:
-        typer.echo(f"   ⚠️  Could not fetch models: {e}")
-        
-    typer.echo("\n✅ Configuration Updated!")
-
-    # ---------------------------------------------------------
-    # 3. START SERVERS
-    # ---------------------------------------------------------
-    typer.echo("\n🚀 Starting ALL MCP Servers...")
-    base_cmd = [sys.executable, "-m", "agentic_docker.cli"]
     
-    typer.echo("   • Launching Docker Server (Port 8080)...")
-    subprocess.Popen(base_cmd + ["server", "--port", "8080"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    
-    typer.echo("   • Launching Local K8s Server (Port 8081)...")
-    subprocess.Popen(base_cmd + ["k8s-server", "--port", "8081"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    
-    typer.echo("   • Launching Remote K8s Server (Port 8082)...")
-    subprocess.Popen(base_cmd + ["remote-k8s-server", "--port", "8082"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-
-    typer.echo("\n✨ All servers are running! Run 'agentic-docker chat' to start.")
+    # Reload settings to ensure we pick up the new host (or manually pass it)
+    # Since we act dynamically, we can just pass the host to the list function
+    from .llm.ollama_client import list_available_models
     
     models = list_available_models(host=selected_host)
     

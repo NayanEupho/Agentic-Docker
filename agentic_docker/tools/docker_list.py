@@ -10,7 +10,9 @@ It implements the Tool interface defined in base.py.
 import docker
 # Import our base Tool class that this tool must inherit from
 from .base import Tool
+from .registry import register_tool
 
+@register_tool
 class DockerListContainersTool(Tool):
     """
     Tool for listing Docker containers.

@@ -15,9 +15,9 @@ from .k8s_config import k8s_config
 # Import typing utilities for type hints
 from typing import Dict, Any
 
-class K8sListPodsTool(K8sTool):
+class LocalK8sListPodsTool(K8sTool):
     """
-    Tool for listing Kubernetes pods.
+    Tool for listing Kubernetes pods in the LOCAL cluster.
     
     This tool can list:
     - Pods in a specific namespace (default: "default")
@@ -38,9 +38,10 @@ class K8sListPodsTool(K8sTool):
         """
         Define the JSON Schema for this tool's parameters.
         
-        This tool accepts two optional parameters:
+        This tool accepts optional parameters:
         - 'namespace': string - the namespace to list pods from (default: "default")
         - 'all_namespaces': boolean - if True, list pods from all namespaces
+        - 'node_name': string - (Optional) List only pods running on this specific node.
         
         The schema follows JSON Schema specification and tells the LLM
         what arguments this tool can accept.
@@ -61,13 +62,18 @@ class K8sListPodsTool(K8sTool):
                     "type": "boolean",
                     "default": False,
                     "description": "If true, list pods from all namespaces. Overrides the 'namespace' parameter."
+                },
+                # 'node_name' parameter: string type, optional
+                "node_name": {
+                    "type": "string",
+                    "description": "Filter pods by node name. Example: 'kc-m1'."
                 }
             },
             # List of required parameters (empty list means all parameters are optional)
             "required": []
         }
 
-    def run(self, namespace: str = "default", all_namespaces: bool = False) -> Dict[str, Any]:
+    def run(self, namespace: str = "default", all_namespaces: bool = False, node_name: str = None) -> Dict[str, Any]:
         """
         Execute the actual Kubernetes command to list pods.
         
@@ -77,6 +83,7 @@ class K8sListPodsTool(K8sTool):
         Args:
             namespace (str): The namespace to list pods from (default: "default")
             all_namespaces (bool): If True, list pods from all namespaces (default: False)
+            node_name (str): Optional node name to filter by.
         
         Returns:
             dict: A structured result containing either:
@@ -96,12 +103,18 @@ class K8sListPodsTool(K8sTool):
                 # List pods in a specific namespace
                 url = f"{api_url}/api/v1/namespaces/{namespace}/pods"
             
+            # Prepare query parameters
+            params = {}
+            if node_name:
+                # Use fieldSelector to filter by node name
+                params['fieldSelector'] = f"spec.nodeName={node_name}"
+            
             # Make the HTTP GET request to the Kubernetes API
             # We disable SSL warning if verify is False
             if not verify_ssl:
                 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
-            response = requests.get(url, headers=headers, verify=verify_ssl, timeout=10)
+            response = requests.get(url, headers=headers, params=params, verify=verify_ssl, timeout=10)
             
             # Check if the request was successful
             response.raise_for_status()
@@ -147,7 +160,8 @@ class K8sListPodsTool(K8sTool):
                 "success": True,
                 "pods": formatted_pods,
                 "count": len(formatted_pods),
-                "namespace": "all" if all_namespaces else namespace
+                "namespace": "all" if all_namespaces else namespace,
+                "filtered_by_node": node_name
             }
             
         except requests.exceptions.ConnectionError:

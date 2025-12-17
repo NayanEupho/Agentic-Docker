@@ -12,24 +12,20 @@ and registration without manual configuration.
 from .docker_list import DockerListContainersTool
 from .docker_run import DockerRunContainerTool
 from .docker_stop import DockerStopContainerTool
+from .chat_tool import ChatTool
 
 # Import typing utilities for type hints
 from typing import List, Optional
 # Import the base Tool class to ensure type safety
 from .base import Tool
 
+# Import the registry to access registered tools
+from .registry import registry
+
 # Define the list of ALL available tools in the system
-# This is the central registry - add new tools here to make them available
-ALL_TOOLS: List[Tool] = [
-    # Create instances of each tool class
-    DockerListContainersTool(),
-    DockerRunContainerTool(),
-    DockerStopContainerTool(),
-    # To add a new tool, simply create its class in a new file
-    # and add an instance here, like:
-    # DockerLogsTool(),
-    # DockerRemoveTool(),
-]
+# This is now dynamically populated from the registry
+# We use a property or function call to get the latest list
+ALL_TOOLS: List[Tool] = registry.get_tools()
 
 def get_tools_schema() -> List[dict]:
     """

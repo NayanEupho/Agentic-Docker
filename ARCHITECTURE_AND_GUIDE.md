@@ -1,9 +1,13 @@
+```mermaid
 graph TD
     User[User Input] -->|1. Natural Language| CLI[CLI (Typer)]
     CLI -->|2. Pass Query| Agent[Agent Orchestrator]
-    Agent -->|3. Get Tool Decision| LLM[Ollama (phi3:mini)]
-    LLM -->|4. Return Tool Name & Args| Agent
-    Agent -->|5. Check Tool Prefix| Router[Routing Logic]
+    Agent -->|3. Inject Context| State[State Fetcher (Docker/K8s)]
+    Agent -->|4. ReAct Loop| LLM[Ollama (Reasoning + Tool Call)]
+    LLM -->|5. Return Thought & JSON| Agent
+    Agent -->|6. Semantic Verification| Verifier[Validation Logic]
+    Verifier -- Invalid? --> LLM
+    Verifier -- Valid --> Router[Routing Logic]
     Router -->|docker_| ClientDocker[Docker Client]
     Router -->|k8s_| ClientLocal[Local K8s Client]
     Router -->|remote_k8s_| ClientRemote[Remote K8s Client]
@@ -15,7 +19,15 @@ graph TD
     ServerRemote -->|kubectl| RemoteCluster[Remote K8s Cluster]
     DockerEngine -->|Result| ServerDocker
     ServerDocker -->|Result| Agent
-    Agent -->|6. Format & Display| User
+    ServerLocal -->|Result| Agent
+    ServerRemote -->|Result| Agent
+    Agent -->|7. Format & Display| User
+
+    subgraph Data Persistence
+        SessionManager[Session Manager]
+        SessionManager <-->|SQL Queries| DB[(SQLite Database)]
+        Agent <-->|Read/Write History| SessionManager
+    end
 ```
 
 ---
@@ -24,11 +36,14 @@ graph TD
 
 Let's trace exactly what happens when you run a command.
 
-### Scenario: "List my local pods"
+### Scenario: "Describe pod nginx-123"
 
-#### Step 1: Initialization (`start-all`)
+#### Step 1: Initialization (Interactive)
 Before you run a query, you execute `agentic-docker start-all`.
-- **Triggers:** `cli.py` spawns 3 separate subprocesses.
+- **Interaction:** The CLI prompts you to select:
+    1. **Host:** Local vs Remote/HPC.
+    2. **Model:** "Hot Swap" selection of available models (e.g., `qwen2.5:72b` or `llama3.2`).
+- **Triggers:** `cli.py` spawns 3 separate subprocesses with the selected configuration.
 - **Process 1:** Starts `server.py` on `localhost:8080` (Docker).
 - **Process 2:** Starts `k8s_server.py` on `localhost:8081` (Local K8s).
 - **Process 3:** Starts `remote_k8s_server.py` on `localhost:8082` (Remote K8s).
@@ -37,42 +52,34 @@ Before you run a query, you execute `agentic-docker start-all`.
 #### Step 2: User Input
 You type:
 ```bash
-agentic-docker run "Show me the pods in the default namespace"
+agentic-docker run "Describe pod nginx-123"
 ```
 
 #### Step 3: CLI Processing
 - **Trigger:** `cli.py` receives the command via the `run` function.
+- **Auto-Proxy:** The CLI automatically configures `NO_PROXY=localhost,127.0.0.1` to bypass corporate proxies.
 - **Action:** The CLI calls `process_query()` with the user's query.
-- **Output:** The query is passed to the Agent for processing.
 
 #### Step 4: Agent Processing
 - **Trigger:** `agent.py` receives the query.
-- **Action 1:** The Agent calls `get_tool_calls()` to ask the LLM which tool to use.
-- **Action 2:** The LLM analyzes the query and returns: `{"name": "k8s_list_pods", "arguments": {"namespace": "default"}}`.
-- **Action 3:** The Agent checks if the tool is dangerous using `confirm_action_auto()`. For listing pods, it's safe, so no confirmation is needed.
-- **Action 4:** The Agent calls `call_k8s_tool()` with the tool name and arguments.
+- **Action 1 (State Injection):** The Agent quickly (in parallel) fetches running containers and pods.
+  - Context: `[System Context: Running Containers: web-app | Active Pods: frontend-7d8b]`
+- **Action 2 (Logic Branching):**
+  - **Fast Mode (Zero-Shot):** If the query is simple, the agent uses a fast, zero-shot prompt.
+  - **Smart Mode (CoT):** If the query is complex or Fast Mode fails (invalid JSON), it switches to Chain-of-Thought reasoning.
+- **Action 3 (Reasoning):**
+  - *Thought:* "User wants details for pod nginx-123. Previous context shows it exists."
+  - *Action:* `[{"name": "remote_k8s_describe_pod", "arguments": {"pod_name": "nginx-123"}}]`
+- **Action 4 (Verification):** The Semantic Verifier checks tool names and arguments.
+- **Action 5:** The Agent calls the tool via MCP Client.
 
 #### Step 5: MCP Client Communication
-- **Trigger:** `mcp/client.py` receives the request to call `k8s_list_pods`.
-- **Action:** The client sends a JSON-RPC 2.0 request to `http://127.0.0.1:8081` (Local K8s MCP Server).
-- **Request Body:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "k8s_list_pods",
-  "params": {
-    "namespace": "default"
-  },
-  "id": 1
-}
-```
+- **Trigger:** `mcp/client.py` sends JSON-RPC request to Port 8082 (Remote K8s).
 
 #### Step 6: MCP Server Execution
-- **Trigger:** `mcp/k8s_server.py` receives the JSON-RPC request.
-- **Action 1:** The server's dispatcher looks up the `k8s_list_pods` method.
-- **Action 2:** It finds the `K8sListPodsTool` instance and calls its `run()` method.
-- **Action 3:** The tool uses the Kubernetes Python client to execute `kubectl get pods -n default`.
-- **Action 4:** The tool formats the result into a structured dictionary.
+- **Trigger:** `mcp/remote_k8s_server.py` calls `RemoteK8sDescribePodTool`.
+- **Action:** The tool fetches Pod metadata + Events + Container Status.
+- **Action:** Returns a rich dictionary object.
 
 #### Step 7: Result Formatting
 - **Trigger:** The tool execution completes successfully.
@@ -80,30 +87,28 @@ agentic-docker run "Show me the pods in the default namespace"
 ```json
 {
   "success": true,
-  "pods": [
-    {"name": "nginx-7cdbd8cdc9-g7brt", "phase": "Running", "ready": "1/1", "pod_ip": "10.1.0.4"},
-    {"name": "redis-master-5ff498c5c6-7qj4b", "phase": "Running", "ready": "1/1", "pod_ip": "10.1.0.5"}
-  ],
-  "count": 2,
-  "namespace": "default"
+  "pod": { "name": "nginx-123", "events": [...], "containers": [...] }
 }
 ```
-- **Action:** The server wraps this in a JSON-RPC response and sends it back to the client.
 
 #### Step 8: Agent Result Processing
 - **Trigger:** The Agent receives the JSON-RPC response.
-- **Action:** The `format_tool_result()` function formats the result into a human-readable string:
+- **Action:** The `format_tool_result()` function detects the complex object and runs a specific formatter:
 ```
-✅ Success! Found 2 pod(s) in namespace 'default':
-
-🟢 nginx-7cdbd8cdc9-g7brt (10.1.0.4) - Running [Ready: 1/1]
-🟢 redis-master-5ff498c5c6-7qj4b (10.1.0.5) - Running [Ready: 1/1]
+✅ Pod: nginx-123
+   Node: kc-worker-1 | IP: 10.1.0.4 | Phase: Running
+   Containers:
+     🟢 nginx (nginx:latest)
+       State: running | Restarts: 0
+   Events (Recent):
+     ℹ️ Scheduled: Successfully assigned to kc-worker-1
+     ℹ️ Pulled: Container image "nginx" already present
 ```
 
 #### Step 9: User Output
 - **Trigger:** The CLI receives the formatted result.
 - **Action:** The CLI prints the result to the terminal.
-- **Output:** You see the list of pods in the default namespace.
+- **Output:** You see the detailed, human-readable report.
 
 ---
 
@@ -112,147 +117,55 @@ agentic-docker run "Show me the pods in the default namespace"
 ### 5.1 The CLI (`cli.py`)
 The CLI is the user-facing interface. It uses the **Typer** library to create a professional command-line interface.
 
+**Key Features:**
+- **Interactive Startup:** Helper prompts for configuring Host/Model.
+- **Auto-Proxy:** Automatically handles `NO_PROXY` settings for seamless localhost connectivity.
+- **Session Modes:** Supports `start`, `end`, `list`, and `chat` (REPL).
+
 **Key Functions:**
 - `run_command()`: The main entry point for user queries.
-- `start_server()`: Starts an individual MCP server.
-- `list_tools()`: Lists all available tools for debugging.
-
-**Example Usage:**
-```bash
-# Run a command
-agentic-docker run "Start nginx on port 8080"
-
-# Start the Docker server
-agentic-docker server
-
-# List available tools
-agentic-docker list-tools
-```
+- `start_all_servers()`: Orchestrates the multi-process startup.
 
 ### 5.2 The Agent (`agent.py`)
 The Agent is the central orchestrator. It coordinates communication between the CLI, LLM, and MCP servers.
 
 **Key Functions:**
 - `process_query()`: The main workflow function that processes a user query.
-- `get_tool_calls()`: Calls the LLM to determine which tool to use.
-- `format_tool_result()`: Formats the tool execution result for display.
+- `format_tool_result()`: Formats complex dictionaries (Pods, Services) into pretty CLI tables/lists.
 
-**Workflow:**
-1. **Tool Selection:** Ask the LLM which tool to use based on the query.
-2. **Safety Check:** Apply safety rules and ask for user confirmation if needed.
-3. **Execution:** Call the appropriate MCP server to execute the tool.
-4. **Formatting:** Format the result in a human-readable way.
+### 5.3 DSPy Agent (`agent_module.py`)
+The project uses **DSPy** (Declarative Self-improving Python) to orchestrate the LLM interactions.
 
-### 5.3 LLM Client (`llm/ollama_client.py`)
-The LLM client handles communication with the local Ollama model.
-
-**Key Functions:**
-- `get_tool_calls()`: Sends a prompt to the LLM asking it to choose a tool.
-- `ensure_model_exists()`: Checks if the required model is available and downloads it if not.
-- `test_llm_connection()`: Verifies that Ollama is accessible.
-
-**Prompt Structure:**
-The LLM receives a structured prompt that includes:
-- A list of all available tools in JSON Schema format.
-- The user's natural language query.
-- Instructions on how to respond (JSON format).
-
-**Example Prompt:**
-```
-You are a Docker assistant. The user wants to perform one or more Docker/Kubernetes operations.
-Your job is to choose the most appropriate tool(s) from the available tools below.
-
-Available tools (in JSON Schema format):
-[
-  {
-    "name": "docker_list_containers",
-    "description": "List running or all Docker containers",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "all": {
-          "type": "boolean",
-          "description": "If true, list all containers (including stopped ones)"
-        }
-      },
-      "required": []
-    }
-  }
-]
-
-User request: "List all containers"
-```
-
-**LLM Response:**
-```json
-[
-  {
-    "name": "docker_list_containers",
-    "arguments": {
-      "all": true
-    }
-  }
-]
-```
+**Key Components:**
+- **FastAgent vs SmartAgent:**
+    - **FastAgent:** Uses `dspy.Predict` (Zero-Shot) for speed (~1-2s).
+    - **SmartAgent:** Uses `dspy.ChainOfThought` for complex reasoning (~5-8s).
+- **Robust Parsing:** Includes a custom retry mechanism (`max_retries=2`) that feeds parsing errors back to the LLM to self-correct.
 
 ### 5.4 MCP Client (`mcp/client.py`)
 The MCP client sends JSON-RPC 2.0 requests to the MCP servers.
-
-**Key Functions:**
-- `call_tool()`: Calls a Docker tool via the Docker MCP server.
-- `call_k8s_tool()`: Calls a Kubernetes tool via the Local K8s MCP server.
-- `call_remote_k8s_tool()`: Calls a Remote Kubernetes tool via the Remote K8s MCP server.
-- `test_connection()`: Tests if a server is accessible.
-
-**JSON-RPC Request Format:**
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "docker_list_containers",
-  "params": {
-    "all": true
-  },
-  "id": 1
-}
-```
-
-**JSON-RPC Response Format:**
-```json
-{
-  "jsonrpc": "2.0",
-  "result": {
-    "success": true,
-    "containers": [
-      {
-        "id": "abc123",
-        "name": "nginx",
-        "image": "nginx:latest",
-        "status": "running"
-      }
-    ],
-    "count": 1
-  },
-  "id": 1
-}
-```
 
 ### 5.5 MCP Servers
 The project uses three separate MCP servers, each running on a different port:
 
 #### Docker MCP Server (`mcp/server.py`)
 - **Port:** 8080
-- **Purpose:** Exposes Docker tools as JSON-RPC methods.
 - **Tools:** `docker_list_containers`, `docker_run_container`, `docker_stop_container`
 
-#### Local Kubernetes MCP Server (`mcp/k8s_server.py`)
+#### Local Kubernetes MCP Server (`mcp/local_k8s_server.py`)
 - **Port:** 8081
-- **Purpose:** Exposes Local Kubernetes tools as JSON-RPC methods.
-- **Tools:** `k8s_list_pods`, `k8s_list_nodes`
+- **Tools:** `local_k8s_list_pods`, `local_k8s_list_nodes`
 
 #### Remote Kubernetes MCP Server (`mcp/remote_k8s_server.py`)
 - **Port:** 8082
 - **Purpose:** Exposes Remote Kubernetes tools as JSON-RPC methods.
-- **Tools:** `remote_k8s_list_pods`, `remote_k8s_list_nodes`, `remote_k8s_list_namespaces`, `remote_k8s_find_pod_namespace`
+- **Tools:** 
+    - `remote_k8s_list_pods`, `remote_k8s_list_nodes`
+    - `remote_k8s_list_deployments`, `remote_k8s_describe_deployment`
+    - `remote_k8s_list_namespaces`, `remote_k8s_describe_namespace`
+    - `remote_k8s_find_pod_namespace`, `remote_k8s_get_resources_ips`
+    - `remote_k8s_list_services`, `remote_k8s_get_service`, `remote_k8s_describe_service`
+    - `remote_k8s_describe_pod`, `remote_k8s_describe_node`
 
 **Server Architecture:**
 Each server follows the same pattern:
@@ -260,22 +173,6 @@ Each server follows the same pattern:
 2. **Create Handlers:** Use `create_tool_handler()` to wrap each tool.
 3. **Register Methods:** Add each handler to the JSON-RPC dispatcher.
 4. **Start Server:** Run the Werkzeug WSGI server.
-
-**Example Server Code:**
-```python
-from jsonrpc import JSONRPCResponseManager, dispatcher
-from werkzeug.serving import run_simple
-from werkzeug.wrappers import Request, Response
-from ..k8s_tools import ALL_K8S_TOOLS
-
-# Register all tools
-for tool in ALL_K8S_TOOLS:
-    handler = create_tool_handler(tool.name)
-    dispatcher.add_method(handler, tool.name)
-
-# Start server
-run_simple('127.0.0.1', 8081, application)
-```
 
 ### 5.6 Tools (`tools/` and `k8s_tools/`)
 Tools are the actual implementations of Docker and Kubernetes operations. They follow a consistent interface defined by the `Tool` base class.
@@ -295,51 +192,6 @@ class Tool:
         pass
 ```
 
-#### Example: Docker List Containers Tool
-```python
-class DockerListContainersTool(Tool):
-    name = "docker_list_containers"
-    description = "List running or all Docker containers"
-
-    def get_parameters_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "all": {
-                    "type": "boolean",
-                    "description": "If true, list all containers (including stopped ones)"
-                }
-            },
-            "required": []
-        }
-
-    def run(self, **kwargs) -> dict:
-        try:
-            client = docker.from_env()
-            all_containers = kwargs.get('all', False)
-            containers = client.containers.list(all=all_containers)
-            
-            formatted_containers = []
-            for container in containers:
-                formatted_containers.append({
-                    "id": container.short_id,
-                    "name": container.name,
-                    "image": container.image.tags[0] if container.image.tags else "unknown",
-                    "status": container.status
-                })
-            
-            return {
-                "success": True,
-                "containers": formatted_containers,
-                "count": len(formatted_containers)
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
-```
-
 ### 5.7 Safety Layer (`safety.py`)
 The safety layer prevents accidental destructive operations by requiring user confirmation.
 
@@ -347,28 +199,13 @@ The safety layer prevents accidental destructive operations by requiring user co
 - `confirm_action()`: Prompts the user for confirmation before executing dangerous operations.
 - `confirm_action_auto()`: Automatically selects the appropriate confirmation method.
 
-**Dangerous Tools:**
-- `docker_stop_container`: Stops running containers.
-- `docker_run_container`: Creates new containers (uses resources).
+### 5.8 Session Manager (`session_manager.py`)
+The Session Manager handles conversation history, allowing the Agent to remember context (e.g., "describe *that* pod").
 
-**Confirmation Flow:**
-1. **Check:** Is the tool in the dangerous list?
-2. **Prompt:** If yes, show a confirmation prompt with details.
-3. **Wait:** Wait for user input (yes/no).
-4. **Proceed/Cancel:** Execute or cancel based on user response.
-
-**Example Prompt:**
-```
-⚠️  POTENTIALLY DANGEROUS ACTION DETECTED
-   Tool: docker_stop_container
-   Arguments: {'container_id': 'abc123'}
-
-   ⚠️  This will STOP container 'abc123' and any processes inside it.
-   ⚠️  Data in non-persistent volumes may be lost.
-
-   🤔 Do you want to proceed with this action?
-   Type 'yes' to confirm or 'no' to cancel: 
-```
+**Key Features:**
+- **Persistence:** Saves sessions to local SQLite database (`agentic_docker/database/agentic_docker.db`).
+- **Context Injection:** Feeds previous messages into the LLM prompt.
+- **Management:** Create, list, delete, and resume sessions using SQL queries.
 
 ---
 
@@ -467,7 +304,7 @@ The system can be configured through environment variables and configuration fil
 - `AGENTIC_DOCKER_PORT`: Port for Docker MCP server (default: 8080)
 - `AGENTIC_K8S_PORT`: Port for Local K8s MCP server (default: 8081)
 - `AGENTIC_REMOTE_K8S_PORT`: Port for Remote K8s MCP server (default: 8082)
-- `AGENTIC_LLM_MODEL`: LLM model to use (default: phi3:mini)
+- `AGENTIC_LLM_MODEL`: LLM model to use (default: llama3.2)
 - `AGENTIC_SAFETY_CONFIRM`: Enable/disable safety confirmation (default: true)
 
 ### 9.2 Adding New Tools

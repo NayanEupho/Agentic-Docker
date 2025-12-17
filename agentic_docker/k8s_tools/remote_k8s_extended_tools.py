@@ -10,6 +10,7 @@ This module implements additional tools for the remote Kubernetes cluster:
 
 import requests
 from typing import Dict, Any, List
+from urllib.parse import quote
 from .k8s_base import K8sTool
 from .k8s_config import k8s_config
 
@@ -74,6 +75,16 @@ class RemoteK8sFindPodNamespaceTool(K8sTool):
 
     def run(self, pod_names: List[str], **kwargs) -> Dict[str, Any]:
         try:
+            # SANITIZATION: Handle LLM returning string "['a','b']" instead of list
+            if isinstance(pod_names, str):
+                import json
+                try:
+                     # LLM often uses single quotes for lists logic "['a']" which is invalid JSON
+                     cleaned_names = pod_names.replace("'", '"')
+                     pod_names = json.loads(cleaned_names)
+                except json.JSONDecodeError:
+                     return {"success": False, "error": f"Invalid format for pod_names: {pod_names}"}
+
             # We need to list pods across all namespaces to find matches
             url = f"{k8s_config.get_api_url()}/api/v1/pods"
             response = requests.get(
@@ -111,7 +122,7 @@ class RemoteK8sFindPodNamespaceTool(K8sTool):
 
 class RemoteK8sGetResourcesIPsTool(K8sTool):
     name = "remote_k8s_get_resources_ips"
-    description = "Get IP addresses and ports for specific pods or nodes in the REMOTE cluster."
+    description = "Get ONLY the IP addresses (InternalIP, ExternalIP) for specific pods or nodes. USE THIS TOOL whenever the user asks for 'IP', 'address', or 'network' details. It is faster and more specific than describing the whole node."
 
     def get_parameters_schema(self) -> Dict[str, Any]:
         return {
@@ -125,17 +136,17 @@ class RemoteK8sGetResourcesIPsTool(K8sTool):
                 "names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of resource names."
+                    "description": "List of resource names. OPTIONAL: If omitted or empty, fetches IPs for ALL resources of that type."
                 },
                 "namespace": {
                     "type": "string",
                     "description": "Namespace to search in (only for pods). Defaults to all namespaces if not specified."
                 }
             },
-            "required": ["resource_type", "names"]
+            "required": ["resource_type"]
         }
 
-    def run(self, resource_type: str, names: List[str], namespace: str = None, **kwargs) -> Dict[str, Any]:
+    def run(self, resource_type: str, names: List[str] = None, namespace: str = None, **kwargs) -> Dict[str, Any]:
         try:
             results = {}
             
@@ -150,6 +161,22 @@ class RemoteK8sGetResourcesIPsTool(K8sTool):
             else:
                 return {"success": False, "error": "Invalid resource_type. Must be 'pod' or 'node'."}
 
+            # Sanitize names if provided
+            if names:
+                if isinstance(names, str):
+                    import json
+                    try:
+                         cleaned_names = names.replace("'", '"')
+                         names = json.loads(cleaned_names)
+                         # If json.loads returns a string (e.g. from input '"kc-m1"'), wrap it
+                         if isinstance(names, str):
+                             names = [names]
+                    except json.JSONDecodeError:
+                         # Fallback: If it's just a raw string like "kc-m1" (not JSON), treat as single name
+                         names = [names]
+            else:
+                names = [] # Handle None case
+
             response = requests.get(
                 url,
                 headers=k8s_config.get_headers(),
@@ -159,6 +186,10 @@ class RemoteK8sGetResourcesIPsTool(K8sTool):
             response.raise_for_status()
             data = response.json()
             items = data.get('items', [])
+            
+            # If names is empty (or meant to be all), we populate it with all names found
+            if not names:
+                names = [i['metadata']['name'] for i in items]
 
             for target_name in names:
                 found = False
@@ -346,7 +377,9 @@ class RemoteK8sDescribeDeploymentTool(K8sTool):
         try:
             # Construct the API URL for the specific deployment resource
             # Endpoint: /apis/apps/v1/namespaces/{namespace}/deployments/{name}
-            url = f"{k8s_config.get_api_url()}/apis/apps/v1/namespaces/{namespace}/deployments/{deployment_name}"
+            safe_name = quote(deployment_name)
+            safe_namespace = quote(namespace)
+            url = f"{k8s_config.get_api_url()}/apis/apps/v1/namespaces/{safe_namespace}/deployments/{safe_name}"
             
             # Make the HTTP GET request
             response = requests.get(
@@ -404,3 +437,278 @@ class RemoteK8sDescribeDeploymentTool(K8sTool):
                 "success": False,
                 "error": str(e)
             }
+
+class RemoteK8sDescribeNodeTool(K8sTool):
+    """
+    Tool to get detailed information about a specific node in a remote Kubernetes cluster.
+    
+    This tool fetches comprehensive information similar to 'kubectl describe node <node_name>',
+    including capacity, allocatable resources, conditions, addresses, and running pods summary.
+    """
+    name = "remote_k8s_describe_node"
+    description = "DESCRIBE a node (like 'kubectl describe node'). Returns full details: CPU/memory capacity, conditions (Ready/DiskPressure), OS info, taints. Use this when user says 'describe node' or wants node details."
+
+    def get_parameters_schema(self) -> Dict[str, Any]:
+        """
+        Define the JSON schema for the tool's parameters.
+        
+        Returns:
+            Dict[str, Any]: JSON Schema object describing 'node_name' parameter.
+        """
+        return {
+            "type": "object",
+            "properties": {
+                "node_name": {
+                    "type": "string",
+                    "description": "REQUIRED: The exact node name to describe. Extract from conversation context (e.g., if user says 'first node' and you know nodes are kc-m1, kc-w1, etc., provide 'kc-m1')."
+                }
+            },
+            "required": ["node_name"]
+        }
+
+    def run(self, node_name: str, **kwargs) -> Dict[str, Any]:
+        """
+        Execute the tool to describe a node.
+
+        Args:
+            node_name (str): The name of the node.
+            **kwargs: Additional arguments (unused).
+
+        Returns:
+            Dict[str, Any]: A dictionary containing success status and detailed node info.
+        """
+        try:
+            # Construct the API URL for the specific node resource
+            # Endpoint: /api/v1/nodes/{node_name}
+            safe_name = quote(node_name)
+            url = f"{k8s_config.get_api_url()}/api/v1/nodes/{safe_name}"
+            
+            # Make the HTTP GET request
+            response = requests.get(
+                url,
+                headers=k8s_config.get_headers(),
+                verify=k8s_config.get_verify_ssl(),
+                timeout=10
+            )
+            
+            # Check for errors (e.g., 404 if node doesn't exist)
+            response.raise_for_status()
+            
+            # Parse the JSON response
+            data = response.json()
+
+            # Extract essential details from the Kubernetes Node object
+            metadata = data.get('metadata', {})
+            spec = data.get('spec', {})
+            status = data.get('status', {})
+            
+            # Extract addresses (InternalIP, ExternalIP, Hostname)
+            addresses = {}
+            for addr in status.get('addresses', []):
+                addresses[addr.get('type')] = addr.get('address')
+            
+            # Extract capacity and allocatable resources
+            capacity = status.get('capacity', {})
+            allocatable = status.get('allocatable', {})
+            
+            # Extract conditions (Ready, DiskPressure, MemoryPressure, etc.)
+            conditions = []
+            for cond in status.get('conditions', []):
+                conditions.append({
+                    "type": cond.get('type'),
+                    "status": cond.get('status'),
+                    "reason": cond.get('reason'),
+                    "message": cond.get('message', '')[:100]  # Truncate long messages
+                })
+            
+            # Extract node info (OS, kernel, container runtime)
+            node_info = status.get('nodeInfo', {})
+            
+            # Construct comprehensive details dictionary
+            details = {
+                "name": metadata.get('name'),
+                "labels": metadata.get('labels', {}),
+                "creation_timestamp": metadata.get('creationTimestamp'),
+                "addresses": addresses,
+                "capacity": {
+                    "cpu": capacity.get('cpu'),
+                    "memory": capacity.get('memory'),
+                    "pods": capacity.get('pods')
+                },
+                "allocatable": {
+                    "cpu": allocatable.get('cpu'),
+                    "memory": allocatable.get('memory'),
+                    "pods": allocatable.get('pods')
+                },
+                "conditions": conditions,
+                "system_info": {
+                    "os_image": node_info.get('osImage'),
+                    "kernel_version": node_info.get('kernelVersion'),
+                    "container_runtime": node_info.get('containerRuntimeVersion'),
+                    "kubelet_version": node_info.get('kubeletVersion'),
+                    "architecture": node_info.get('architecture')
+                },
+                "taints": spec.get('taints', []),
+                "unschedulable": spec.get('unschedulable', False)
+            }
+
+            return {
+                "success": True,
+                "node": details
+            }
+        except Exception as e:
+            # Handle exceptions
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+
+class RemoteK8sDescribePodTool(K8sTool):
+    """
+    Tool to get detailed information about a specific pod in a remote cluster.
+    """
+    name = "remote_k8s_describe_pod"
+    description = "DESCRIBE a pod. Returns comprehensive details including status, containers, images, restart counts, conditions, and events. Use this when the user asks to 'describe pod <name>'."
+
+    def get_parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pod_name": {
+                    "type": "string",
+                    "description": "Name of the pod to describe."
+                },
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace of the pod. Defaults to 'default'."
+                }
+            },
+            "required": ["pod_name"]
+        }
+
+    def run(self, pod_name: str, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+        try:
+            safe_name = quote(pod_name)
+            safe_ns = quote(namespace)
+            
+            # 1. Get Pod Details
+            url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/pods/{safe_name}"
+            response = requests.get(
+                url,
+                headers=k8s_config.get_headers(),
+                verify=k8s_config.get_verify_ssl(),
+                timeout=10
+            )
+            response.raise_for_status()
+            pod_data = response.json()
+
+            # 2. Get Pod Events (for a true 'describe' feel)
+            # Events are usually filtered by involvedObject using fieldSelector
+            events_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/events?fieldSelector=involvedObject.name={safe_name},involvedObject.namespace={safe_ns},involvedObject.uid={pod_data['metadata']['uid']}"
+            
+            events_resp = requests.get(
+                events_url,
+                headers=k8s_config.get_headers(),
+                verify=k8s_config.get_verify_ssl(),
+                timeout=10
+            )
+            events = []
+            if events_resp.ok:
+                for e in events_resp.json().get('items', []):
+                    events.append({
+                        "type": e.get('type'),
+                        "reason": e.get('reason'),
+                        "message": e.get('message'),
+                        "count": e.get('count', 1),
+                        "last_timestamp": e.get('lastTimestamp')
+                    })
+
+            # Formatting Response
+            metadata = pod_data.get('metadata', {})
+            spec = pod_data.get('spec', {})
+            status = pod_data.get('status', {})
+
+            containers = []
+            for c_spec in spec.get('containers', []):
+                # find corresponding status
+                c_status = next((CS for CS in status.get('containerStatuses', []) if CS['name'] == c_spec['name']), {})
+                containers.append({
+                    "name": c_spec['name'],
+                    "image": c_spec['image'],
+                    "ready": c_status.get('ready', False),
+                    "restart_count": c_status.get('restartCount', 0),
+                    "state": c_status.get('state', {}),
+                    "ports": [p.get('containerPort') for p in c_spec.get('ports', [])]
+                })
+
+            details = {
+                "name": metadata.get('name'),
+                "namespace": metadata.get('namespace'),
+                "node_name": spec.get('nodeName'),
+                "start_time": status.get('startTime'),
+                "phase": status.get('phase'),
+                "pod_ip": status.get('podIP'),
+                "host_ip": status.get('hostIP'),
+                "labels": metadata.get('labels', {}),
+                "containers": containers,
+                "conditions": status.get('conditions', []),
+                "events": events
+            }
+
+            return {
+                "success": True,
+                "pod": details
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+class RemoteK8sDescribeNamespaceTool(K8sTool):
+    """
+    Tool to describe a namespace.
+    """
+    name = "remote_k8s_describe_namespace"
+    description = "DESCRIBE a namespace. Returns status, labels, and resource quotas (if implemented). Use when user asks 'describe namespace <name>'."
+
+    def get_parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "namespace_name": {
+                    "type": "string",
+                    "description": "Name of the namespace."
+                }
+            },
+            "required": ["namespace_name"]
+        }
+
+    def run(self, namespace_name: str, **kwargs) -> Dict[str, Any]:
+        try:
+            safe_name = quote(namespace_name)
+            url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_name}"
+            
+            response = requests.get(
+                url,
+                headers=k8s_config.get_headers(),
+                verify=k8s_config.get_verify_ssl(),
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            metadata = data.get('metadata', {})
+            status = data.get('status', {})
+
+            return {
+                "success": True,
+                "namespace": {
+                    "name": metadata.get('name'),
+                    "status": status.get('phase'),
+                    "creation_timestamp": metadata.get('creationTimestamp'),
+                    "labels": metadata.get('labels', {}),
+                    "annotations": metadata.get('annotations', {})
+                }
+            }
+        except Exception as e:
+             return {"success": False, "error": str(e)}

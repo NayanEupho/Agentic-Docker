@@ -15,23 +15,15 @@ from .k8s_config import k8s_config
 # Import typing utilities for type hints
 from typing import Dict, Any
 
-class K8sListNodesTool(K8sTool):
+class LocalK8sListNodesTool(K8sTool):
     """
-    Tool for listing Kubernetes nodes.
-    
-    This tool lists all nodes in the Kubernetes cluster and provides
-    information about their status, roles, and resources.
-    
-    It communicates with the Kubernetes API via the configured URL.
+    Tool for listing Kubernetes nodes in the LOCAL cluster.
     """
-    
-    # Define the unique name for this tool
-    # This name will be used by the LLM to call this specific tool
-    name = "k8s_list_nodes"
+    name = "local_k8s_list_nodes"
     
     # Provide a human-readable description of what this tool does
     # The LLM will use this description to understand when to use this tool
-    description = "List all Kubernetes nodes in the cluster"
+    description = "List all Kubernetes nodes in the LOCAL cluster. Use this when user says 'local machine', 'local nodes', or just 'nodes' without specifying remote."
     
     def get_parameters_schema(self) -> Dict[str, Any]:
         """
