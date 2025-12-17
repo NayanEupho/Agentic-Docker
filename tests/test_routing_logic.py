@@ -7,17 +7,17 @@ from unittest.mock import MagicMock, patch
 sys.path.append(os.getcwd())
 
 # Mock the dependencies
-sys.modules["agentic_docker.llm.ollama_client"] = MagicMock()
-sys.modules["agentic_docker.mcp.client"] = MagicMock()
-sys.modules["agentic_docker.safety"] = MagicMock()
-sys.modules["agentic_docker.tools"] = MagicMock()
-sys.modules["agentic_docker.k8s_tools"] = MagicMock()
-sys.modules["agentic_docker.k8s_tools.remote_k8s_tools"] = MagicMock()
+sys.modules["devops_agent.llm.ollama_client"] = MagicMock()
+sys.modules["devops_agent.mcp.client"] = MagicMock()
+sys.modules["devops_agent.safety"] = MagicMock()
+sys.modules["devops_agent.tools"] = MagicMock()
+sys.modules["devops_agent.k8s_tools"] = MagicMock()
+sys.modules["devops_agent.k8s_tools.remote_k8s_tools"] = MagicMock()
 
-from agentic_docker.agent import process_query
-from agentic_docker.llm.ollama_client import get_tool_call
-from agentic_docker.mcp.client import call_tool, call_k8s_tool, call_remote_k8s_tool
-from agentic_docker.safety import confirm_action_auto
+from devops_agent.agent import process_query
+from devops_agent.llm.ollama_client import get_tool_call
+from devops_agent.mcp.client import call_tool, call_k8s_tool, call_remote_k8s_tool
+from devops_agent.safety import confirm_action_auto
 
 # Setup mocks
 confirm_action_auto.return_value = True

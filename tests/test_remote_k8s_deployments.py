@@ -1,12 +1,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import json
-from agentic_docker.k8s_tools.remote_k8s_extended_tools import (
+from devops_agent.k8s_tools.remote_k8s_extended_tools import (
     RemoteK8sListDeploymentsTool,
     RemoteK8sDescribeDeploymentTool
 )
 # Import the actual config object to patch it directly
-from agentic_docker.k8s_tools.k8s_config import k8s_config
+from devops_agent.k8s_tools.k8s_config import k8s_config
 
 class TestRemoteK8sDeploymentTools(unittest.TestCase):
 
@@ -14,7 +14,7 @@ class TestRemoteK8sDeploymentTools(unittest.TestCase):
         self.list_tool = RemoteK8sListDeploymentsTool()
         self.describe_tool = RemoteK8sDescribeDeploymentTool()
 
-    @patch('agentic_docker.k8s_tools.remote_k8s_extended_tools.requests.get')
+    @patch('devops_agent.k8s_tools.remote_k8s_extended_tools.requests.get')
     def test_list_deployments_all_namespaces(self, mock_get):
         # Patch the config methods directly
         with patch.object(k8s_config, 'get_api_url', return_value="https://k8s-remote:6443"), \
@@ -75,7 +75,7 @@ class TestRemoteK8sDeploymentTools(unittest.TestCase):
                 timeout=10
             )
 
-    @patch('agentic_docker.k8s_tools.remote_k8s_extended_tools.requests.get')
+    @patch('devops_agent.k8s_tools.remote_k8s_extended_tools.requests.get')
     def test_list_deployments_specific_namespace(self, mock_get):
         with patch.object(k8s_config, 'get_api_url', return_value="https://k8s-remote:6443"), \
              patch.object(k8s_config, 'get_headers', return_value={"Authorization": "Bearer token"}), \
@@ -99,7 +99,7 @@ class TestRemoteK8sDeploymentTools(unittest.TestCase):
             self.assertTrue(result['success'])
             self.assertEqual(result['count'], 0)
 
-    @patch('agentic_docker.k8s_tools.remote_k8s_extended_tools.requests.get')
+    @patch('devops_agent.k8s_tools.remote_k8s_extended_tools.requests.get')
     def test_describe_deployment(self, mock_get):
         with patch.object(k8s_config, 'get_api_url', return_value="https://k8s-remote:6443"), \
              patch.object(k8s_config, 'get_headers', return_value={"Authorization": "Bearer token"}), \

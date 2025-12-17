@@ -7,7 +7,7 @@ import builtins
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from agentic_docker.agent import process_query
+from devops_agent.agent import process_query
 
 class TestAgentRouting(unittest.TestCase):
 
@@ -19,13 +19,13 @@ class TestAgentRouting(unittest.TestCase):
     def tearDown(self):
         self.print_patcher.stop()
 
-    @patch('agentic_docker.agent.ensure_model_exists')
-    @patch('agentic_docker.agent.test_connection')
-    @patch('agentic_docker.agent.test_k8s_connection')
-    @patch('agentic_docker.agent.get_tool_call')
-    @patch('agentic_docker.agent.confirm_action_auto')
-    @patch('agentic_docker.agent.call_tool')
-    @patch('agentic_docker.agent.call_k8s_tool')
+    @patch('devops_agent.agent.ensure_model_exists')
+    @patch('devops_agent.agent.test_connection')
+    @patch('devops_agent.agent.test_k8s_connection')
+    @patch('devops_agent.agent.get_tool_call')
+    @patch('devops_agent.agent.confirm_action_auto')
+    @patch('devops_agent.agent.call_tool')
+    @patch('devops_agent.agent.call_k8s_tool')
     def test_route_to_k8s(self, mock_call_k8s, mock_call_docker, mock_confirm, mock_get_tool, mock_test_k8s, mock_test_docker, mock_model):
         # Setup mocks
         mock_model.return_value = True
@@ -55,13 +55,13 @@ class TestAgentRouting(unittest.TestCase):
         mock_call_docker.assert_not_called()
         self.assertIn("Success", result)
 
-    @patch('agentic_docker.agent.ensure_model_exists')
-    @patch('agentic_docker.agent.test_connection')
-    @patch('agentic_docker.agent.test_k8s_connection')
-    @patch('agentic_docker.agent.get_tool_call')
-    @patch('agentic_docker.agent.confirm_action_auto')
-    @patch('agentic_docker.agent.call_tool')
-    @patch('agentic_docker.agent.call_k8s_tool')
+    @patch('devops_agent.agent.ensure_model_exists')
+    @patch('devops_agent.agent.test_connection')
+    @patch('devops_agent.agent.test_k8s_connection')
+    @patch('devops_agent.agent.get_tool_call')
+    @patch('devops_agent.agent.confirm_action_auto')
+    @patch('devops_agent.agent.call_tool')
+    @patch('devops_agent.agent.call_k8s_tool')
     def test_route_to_docker(self, mock_call_k8s, mock_call_docker, mock_confirm, mock_get_tool, mock_test_k8s, mock_test_docker, mock_model):
         # Setup mocks
         mock_model.return_value = True

@@ -3,11 +3,11 @@ from unittest.mock import patch, MagicMock
 import sys
 import os
 
-# Add project root to path so we can import agentic_docker
+# Add project root to path so we can import devops_agent
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from agentic_docker.k8s_tools.k8s_list_pods import K8sListPodsTool
-from agentic_docker.k8s_tools.k8s_list_nodes import K8sListNodesTool
+from devops_agent.k8s_tools.local_k8s_list_pods import LocalK8sListPodsTool
+from devops_agent.k8s_tools.local_k8s_list_nodes import LocalK8sListNodesTool
 
 class TestK8sTools(unittest.TestCase):
 
@@ -36,7 +36,7 @@ class TestK8sTools(unittest.TestCase):
         mock_get.return_value = mock_response
 
         # Run tool
-        tool = K8sListPodsTool()
+        tool = LocalK8sListPodsTool()
         result = tool.run(namespace="default")
 
         # Verify
@@ -72,7 +72,7 @@ class TestK8sTools(unittest.TestCase):
         mock_get.return_value = mock_response
 
         # Run tool
-        tool = K8sListNodesTool()
+        tool = LocalK8sListNodesTool()
         result = tool.run()
 
         # Verify

@@ -8,7 +8,7 @@ import json
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from agentic_docker.llm.ollama_client import get_tool_call
+from devops_agent.llm.ollama_client import get_tool_call
 
 class TestLLMParsing(unittest.TestCase):
 
@@ -20,7 +20,7 @@ class TestLLMParsing(unittest.TestCase):
     def tearDown(self):
         self.print_patcher.stop()
 
-    @patch('agentic_docker.llm.ollama_client.ollama.chat')
+    @patch('devops_agent.llm.ollama_client.ollama.chat')
     def test_missing_arguments_key(self, mock_chat):
         # Simulate LLM response without arguments key
         mock_response = {
@@ -38,7 +38,7 @@ class TestLLMParsing(unittest.TestCase):
         self.assertEqual(result['name'], "k8s_list_nodes")
         self.assertEqual(result['arguments'], {})
 
-    @patch('agentic_docker.llm.ollama_client.ollama.chat')
+    @patch('devops_agent.llm.ollama_client.ollama.chat')
     def test_valid_response(self, mock_chat):
         # Simulate valid LLM response
         mock_response = {

@@ -1,12 +1,14 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import json
-from agentic_docker.k8s_tools.remote_k8s_extended_tools import (
+from devops_agent.k8s_tools.remote_k8s_extended_tools import (
+    RemoteK8sListDeploymentsTool,
+    RemoteK8sDescribeDeploymentTool,
     RemoteK8sListNamespacesTool,
     RemoteK8sFindPodNamespaceTool,
     RemoteK8sGetResourcesIPsTool
 )
-from agentic_docker.k8s_tools.k8s_config import k8s_config
+from devops_agent.k8s_tools.k8s_config import k8s_config
 
 class TestRemoteK8sExtendedTools(unittest.TestCase):
 

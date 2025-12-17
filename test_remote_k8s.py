@@ -1,7 +1,7 @@
 import sys
 import os
 import time
-from agentic_docker.mcp.client import call_k8s_tool
+from devops_agent.mcp.client import call_k8s_tool
 
 print("Testing Remote K8s Integration...")
 

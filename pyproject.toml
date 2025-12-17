@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentic-docker"
+name = "devops-agent"
 version = "1.0.0"
 description = "AI-powered Docker assistant using natural language commands"
 readme = "README.md"
 authors = [
-    {name = "Agentic Docker Team", email = "team@agentic-docker.example.com"}
+    {name = "DevOps Agent Team", email = "team@devops-agent.example.com"}
 ]
 license = {text = "MIT"}
 classifiers = [
@@ -45,13 +45,13 @@ dev = [
 ]
 
 [project.scripts]
-agentic-docker = "agentic_docker.cli:main"
+devops-agent = "devops_agent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/agentic-docker"
-Repository = "https://github.com/your-username/agentic-docker"
-"Bug Tracker" = "https://github.com/your-username/agentic-docker/issues"
+Homepage = "https://github.com/your-username/devops-agent"
+Repository = "https://github.com/your-username/devops-agent"
+"Bug Tracker" = "https://github.com/your-username/devops-agent/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agentic_docker*"]
+include = ["devops_agent*"]

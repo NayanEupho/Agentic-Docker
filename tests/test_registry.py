@@ -1,6 +1,6 @@
 import pytest
-from agentic_docker.tools.base import Tool
-from agentic_docker.tools.registry import ToolRegistry, register_tool
+from devops_agent.tools.base import Tool
+from devops_agent.tools.registry import ToolRegistry, register_tool
 
 # Mock Tool 1
 class MockTool1(Tool):

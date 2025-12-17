@@ -1,11 +1,12 @@
-# Agentic Docker
+# DevOps Agent
 
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Docker](https://img.shields.io/badge/docker-required-blue)
+![Kubernetes](https://img.shields.io/badge/kubernetes-optional-purple)
 ![Ollama](https://img.shields.io/badge/ollama-required-orange)
 
-An AI-powered Docker assistant that understands natural language commands. This project demonstrates the use of local Large Language Models (LLMs) via [Ollama](https://ollama.com/) to interpret human-readable instructions and safely execute corresponding Docker operations using the Model Context Protocol (MCP).
+An AI-powered DevOps assistant that understands natural language commands. Control Docker containers, local Kubernetes clusters, and remote Kubernetes clusters using plain English. Built with local LLMs via [Ollama](https://ollama.com/) for privacy, using the Model Context Protocol (MCP) for extensibility.
 
 ## Table of Contents
 
@@ -34,7 +35,7 @@ An AI-powered Docker assistant that understands natural language commands. This 
 - **Command Chaining:** Execute multiple actions in a single query (e.g., "Start nginx and list pods").
 - **Parallel Execution:** Independent tools are executed in parallel for faster performance.
 - **Remote Ollama Support:** Connect to powerful remote LLMs (e.g., on HPC or cloud) while keeping the agent local. "Hot-swap" models instantly.
-- **Interactive Chat Mode:** Permanent REPL session with context memory (`agentic-docker chat`).
+- **Interactive Chat Mode:** Permanent REPL session with context memory (`devops-agent chat`).
 - **Reliability Engine:**
     - **Fast/Smart Modes:** Automatically switches between "Fast Mode" (Zero-Shot) for simple queries and "Smart Mode" (Chain-of-Thought) for complex reasoning.
     - **ReAct Prompting:** Agent "thinks" before acting to improve intent detection.
@@ -92,7 +93,7 @@ graph TD
 1.  **Clone the Repository:**
     ```bash
     git clone <your-repository-url>
-    cd agentic-docker
+    cd devops-agent
     ```
 
 2.  **Create and Activate a Virtual Environment:**
@@ -119,7 +120,7 @@ graph TD
 
 ## Usage
 
-The system requires two main components to be running simultaneously: the Ollama service (providing the LLM) and the Agentic Docker MCP servers.
+The system requires two main components to be running simultaneously: the Ollama service (providing the LLM) and the DevOps Agent MCP servers.
 
 ### Step 1: Start Ollama Service
 
@@ -139,7 +140,7 @@ Open **another new terminal** window/tab.
 1.  Navigate to the project directory and activate the virtual environment.
 2.  Run the start command:
     ```bash
-    agentic-docker start-all
+    devops-agent start-all
     ```
 3.  **Follow the Interactive Prompts:**
     - **Host Selection:** Choose between `[1] Local (localhost)` or `[2] Remote / HPC`.
@@ -152,9 +153,9 @@ Open **another new terminal** window/tab.
 
     *Alternatively, you can start them individually:*
     ```bash
-    agentic-docker server --port 8080
-    agentic-docker k8s-server --port 8081
-    agentic-docker remote-k8s-server --port 8082
+    devops-agent server --port 8080
+    devops-agent k8s-server --port 8081
+    devops-agent remote-k8s-server --port 8082
     ```
 
 ### Step 3: Run Commands
@@ -166,29 +167,29 @@ Open **a third terminal** window/tab for running your commands.
 
     **Docker Commands:**
     ```bash
-    agentic-docker run "List all containers"
-    agentic-docker run "Start nginx on port 8080"
+    devops-agent run "List all containers"
+    devops-agent run "Start nginx on port 8080"
     ```
 
     **Local Kubernetes Commands:**
     ```bash
-    agentic-docker run "Show me the running nodes in my local machine"
-    agentic-docker run "List pods in default namespace"
+    devops-agent run "Show me the running nodes in my local machine"
+    devops-agent run "List pods in default namespace"
     ```
 
     **Remote Kubernetes Commands:**
     ```bash
-    agentic-docker run "Show me the running nodes in remote cluster"
-    agentic-docker run "List pods in remote cluster"
+    devops-agent run "Show me the running nodes in remote cluster"
+    devops-agent run "List pods in remote cluster"
     # New Describe Capabilities:
-    agentic-docker run "Describe pod n8n-workflow-123"
-    agentic-docker run "Describe namespace kube-system"
-    agentic-docker run "Describe service my-service"
+    devops-agent run "Describe pod n8n-workflow-123"
+    devops-agent run "Describe namespace kube-system"
+    devops-agent run "Describe service my-service"
     ```
 
     **Interactive Chat Mode:**
     ```bash
-    agentic-docker chat
+    devops-agent chat
     # Type your queries, use /model to switch models, or exit to quit.
     ```
 
@@ -198,48 +199,47 @@ The tool supports conversation sessions, allowing you to maintain context across
 
 **Start a Session:**
 ```bash
-agentic-docker session start "Debugging Nginx"
+devops-agent session start "Debugging Nginx"
 # Output: Session started with ID: <session_id>
 ```
 
 **Run Commands in Session:**
 Once a session is started, all `run` commands automatically use it.
 ```bash
-agentic-docker run "List pods in default namespace"
-agentic-docker run "Describe the first pod"  # Uses context from previous command
+devops-agent run "Describe the first pod"  # Uses context from previous command
 ```
 
 **Manage Sessions:**
 ```bash
-agentic-docker session list   # List all sessions
-agentic-docker session show <id>  # Show history of a session
-agentic-docker session end    # End the current active session
-agentic-docker session clear  # Clear all history
+devops-agent session list   # List all sessions
+devops-agent session show <id>  # Show history of a session
+devops-agent session end    # End the current active session
+devops-agent session clear  # Clear all history
 ```
 
 **Interactive Chat Mode (REPL)**
 
 Instead of running single commands, you can enter an interactive chat mode:
 ```bash
-agentic-docker chat
+devops-agent chat
 ```
 
 **Features:**
 - **Persistent Session:** Remembers previous commands and outputs.
 - **Session Management:**
   ```bash
-  agentic-docker chat --session "Debug Nginx"      # Create named session
-  agentic-docker chat --session-resume <id>        # Resume specific session
+  devops-agent chat --session "Debug Nginx"      # Create named session
+  devops-agent chat --session-resume <id>        # Resume specific session
   ```
 - **Hot Swap:** Switch models (Local vs. Remote) instantly inside the chat using `/model`.
 
 ## Configuration
  
-The default LLM model is `llama3.2`. You can change this by modifying `agentic_docker/settings.py` or setting the `AGENTIC_LLM_MODEL` environment variable.
+The default LLM model is `llama3.2`. You can change this by modifying `devops_agent/settings.py` or setting the `DEVOPS_LLM_MODEL` environment variable.
 
 ### Remote Ollama (HPC / Cloud)
 You can connect to a remote Ollama instance (e.g., a powerful GPU server) instead of running strictly locally.
-1. Run `agentic-docker start-all`.
+1. Run `devops-agent start-all`.
 2. Select **[2] Remote / HPC** in the wizard.
 3. Enter the URL (e.g., `http://192.168.1.50:11434`).
 4. Select a model from the *remote* server.
@@ -249,17 +249,17 @@ The CLI will visually indicate the context: `[Remote: llama3.1:70b]`.
 
 ### Core CLI Commands
 
-- `agentic-docker start-all`: **Recommended.** Starts all 3 MCP servers (Docker, Local K8s, Remote K8s) in separate processes.
-- `agentic-docker run "<query>"`: Executes a command based on the natural language query.
-- `agentic-docker session`: Access session management subcommands (`start`, `end`, `list`, `show`, `clear`).
-- `agentic-docker status`: Checks the status of the LLM connection, MCP servers, and available tools.
-- `agentic-docker list-tools`: Lists all available tools.
+- `devops-agent start-all`: **Recommended.** Starts all 3 MCP servers (Docker, Local K8s, Remote K8s) in separate processes.
+- `devops-agent run "<query>"`: Executes a command based on the natural language query.
+- `devops-agent session`: Access session management subcommands (`start`, `end`, `list`, `show`, `clear`).
+- `devops-agent status`: Checks the status of the LLM connection, MCP servers, and available tools.
+- `devops-agent list-tools`: Lists all available tools.
 
 ### Server Commands (for manual control)
 
-- `agentic-docker server`: Starts the Docker MCP server (default port 8080).
-- `agentic-docker k8s-server`: Starts the Local Kubernetes MCP server (default port 8081).
-- `agentic-docker remote-k8s-server`: Starts the Remote Kubernetes MCP server (default port 8082).
+- `devops-agent server`: Starts the Docker MCP server (default port 8080).
+- `devops-agent k8s-server`: Starts the Local Kubernetes MCP server (default port 8081).
+- `devops-agent remote-k8s-server`: Starts the Remote Kubernetes MCP server (default port 8082).
 
 ### Natural Language Examples
 
@@ -294,8 +294,8 @@ The CLI will visually indicate the context: `[Remote: llama3.1:70b]`.
 ## Project Structure
 
 ```
-agentic-docker/
-├── agentic_docker/           # Main Python package
+devops-agent/
+├── devops_agent/             # Main Python package
 │   ├── __init__.py
 │   ├── cli.py                # Command-Line Interface (Typer)
 │   ├── agent.py              # Orchestrates LLM, tools, safety
@@ -303,7 +303,7 @@ agentic-docker/
 │   ├── settings.py           # Configuration management
 │   ├── database/             # Database layer
 │   │   ├── __init__.py
-│   │   ├── agentic_docker.db # SQLite database file (auto-created)
+│   │   ├── devops_agent.db   # SQLite database file (auto-created)
 │   │   ├── db.py             # SQL repository and schema
 │   │   └── session_manager.py # Manages conversation history/context
 │   ├── mcp/                  # Model Context Protocol components
@@ -321,6 +321,6 @@ agentic-docker/
 
 ## Troubleshooting
 
-- **"Cannot connect to MCP server..."**: Ensure you have run `agentic-docker start-all` or the specific server command.
+- **"Cannot connect to MCP server..."**: Ensure you have run `devops-agent start-all` or the specific server command.
 - **"LLM not available..."**: Ensure `ollama serve` is running.
 - **"UnicodeEncodeError"**: On Windows, you might see emoji encoding errors in some terminals. Try using a terminal that supports UTF-8 (like Windows Terminal) or set `PYTHONIOENCODING=utf-8`.

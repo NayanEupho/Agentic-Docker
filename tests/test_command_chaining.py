@@ -1,14 +1,14 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from agentic_docker.agent import process_query
-from agentic_docker.llm import ollama_client
+from devops_agent.agent import process_query
+from devops_agent.llm import ollama_client
 
 class TestCommandChaining(unittest.TestCase):
 
-    @patch('agentic_docker.agent.get_tool_calls')
-    @patch('agentic_docker.agent.call_tool')
-    @patch('agentic_docker.agent.call_k8s_tool')
-    @patch('agentic_docker.agent.confirm_action_auto')
+    @patch('devops_agent.agent.get_tool_calls')
+    @patch('devops_agent.agent.call_tool')
+    @patch('devops_agent.agent.call_k8s_tool')
+    @patch('devops_agent.agent.confirm_action_auto')
     def test_single_command_chaining(self, mock_confirm, mock_k8s_tool, mock_docker_tool, mock_get_tool_calls):
         """Test that a single command is executed correctly as a list of 1."""
         # Mock LLM returning a single tool call in a list
@@ -36,10 +36,10 @@ class TestCommandChaining(unittest.TestCase):
         # Verify result contains success message
         self.assertIn("Success! No containers found", result)
 
-    @patch('agentic_docker.agent.get_tool_calls')
-    @patch('agentic_docker.agent.call_tool')
-    @patch('agentic_docker.agent.call_k8s_tool')
-    @patch('agentic_docker.agent.confirm_action_auto')
+    @patch('devops_agent.agent.get_tool_calls')
+    @patch('devops_agent.agent.call_tool')
+    @patch('devops_agent.agent.call_k8s_tool')
+    @patch('devops_agent.agent.confirm_action_auto')
     def test_multi_command_chaining(self, mock_confirm, mock_k8s_tool, mock_docker_tool, mock_get_tool_calls):
         """Test that multiple commands are executed sequentially."""
         # Mock LLM returning two tool calls
@@ -82,7 +82,7 @@ class TestCommandChaining(unittest.TestCase):
         self.assertIn("Container started", result)
         self.assertIn("No pods found in namespace 'default'", result)
 
-    @patch('agentic_docker.llm.ollama_client.ollama.chat')
+    @patch('devops_agent.llm.ollama_client.ollama.chat')
     def test_ollama_client_parsing_list(self, mock_chat):
         """Test that ollama_client correctly parses a JSON list response."""
         # Mock Ollama response with a JSON list
@@ -99,7 +99,7 @@ class TestCommandChaining(unittest.TestCase):
         self.assertEqual(tools[0]['name'], 'tool1')
         self.assertEqual(tools[1]['name'], 'tool2')
 
-    @patch('agentic_docker.llm.ollama_client.ollama.chat')
+    @patch('devops_agent.llm.ollama_client.ollama.chat')
     def test_ollama_client_parsing_single_object(self, mock_chat):
         """Test backward compatibility: parsing a single JSON object into a list."""
         # Mock Ollama response with a single JSON object

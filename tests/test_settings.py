@@ -1,7 +1,7 @@
 import os
 import pytest
 from unittest import mock
-from agentic_docker.settings import AgenticSettings
+from devops_agent.settings import AgenticSettings
 
 def test_settings_defaults():
     """Test that settings load with correct default values."""
@@ -15,7 +15,7 @@ def test_settings_defaults():
 
 def test_settings_env_override():
     """Test that environment variables override defaults."""
-    with mock.patch.dict(os.environ, {"AGENTIC_LLM_MODEL": "test-model", "AGENTIC_DOCKER_PORT": "9000"}):
+    with mock.patch.dict(os.environ, {"DEVOPS_LLM_MODEL": "test-model", "DEVOPS_DOCKER_PORT": "9000"}):
         settings = AgenticSettings()
         assert settings.LLM_MODEL == "test-model"
         assert settings.DOCKER_PORT == 9000
