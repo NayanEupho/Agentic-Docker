@@ -43,6 +43,9 @@ An AI-powered DevOps assistant that understands natural language commands. Contr
     - **Live Context:** Injects real-time cluster state (running pods/containers) into the prompt to prevent "hallucinated resource" errors.
 - **Advanced Inspection:** Comprehensive `describe` tools for Remote K8s (Pods, Services, Namespaces, Nodes) with event logs and status details.
 - **Auto-Proxy Config:** Automatically bypasses `NO_PROXY` settings for localhost to prevent connectivity issues in corporate environments.
+- **Mix-and-Match Hosts:** Flexible configuration allows Primary (Smart) and Fast models to run on ANY combination of Local or Remote hosts.
+- **In-App Model Downloading:** Directly pull missing models via the CLI wizard without leaving the agent.
+- **Enhanced Debugging:** "Raw API Error" reporting reveals the exact JSON response from Kubernetes for easier troubleshooting (e.g., distinguishing 403 vs 404).
 
 ## Architecture
 
@@ -74,7 +77,7 @@ graph TD
 
     subgraph Data Persistence
         SessionManager[Session Manager]
-        SessionManager <-->|.agent_sessions.json| Storage[(Disk Storage)]
+        SessionManager <-->|devops_agent.db| Storage[(SQLite DB)]
         Agent <-->|Read/Write History| SessionManager
     end
 ```
@@ -142,9 +145,11 @@ Open **another new terminal** window/tab.
     ```bash
     devops-agent start-all
     ```
-3.  **Follow the Interactive Prompts:**
-    - **Host Selection:** Choose between `[1] Local (localhost)` or `[2] Remote / HPC`.
-    - **Model Selection:** Select a model from the list of available models on the chosen host. The system supports "Hot Swapping" models at startup.
+3.  **Follow the Streamlined Wizard:**
+    - **🤖 Smart Model Setup:** Select **Host** (Local/Remote) and **Model**.
+    - **⚡ Fast Model Setup:** Choose to reuse the Smart configuration or pick a different Host/Model for speed (e.g., Local Fast Model + Remote Smart Model).
+    - **[+] Download Models:** If a model isn't listed, select `[+] Download/Pull New Model` to fetch it instantly.
+    - **Summary:** Review your final configuration before servers launch.
 
     This will launch 3 separate processes in new windows:
     - Docker MCP Server (Port 8080)
@@ -298,7 +303,10 @@ devops-agent/
 ├── devops_agent/             # Main Python package
 │   ├── __init__.py
 │   ├── cli.py                # Command-Line Interface (Typer)
+│   ├── cli_helper.py         # CLI Wizard & TUI helpers
 │   ├── agent.py              # Orchestrates LLM, tools, safety
+│   ├── agent_module.py       # DSPy Agent definition
+│   ├── dspy_client.py        # DSPy Integration
 │   ├── safety.py             # Confirmation logic
 │   ├── settings.py           # Configuration management
 │   ├── database/             # Database layer

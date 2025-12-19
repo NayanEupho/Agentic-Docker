@@ -18,6 +18,7 @@ from .tools import get_tools_schema
 from .k8s_tools import get_k8s_tools_schema
 from .k8s_tools.remote_k8s_tools import get_remote_k8s_tools_schema
 from typing import Dict, Any, List, Optional
+from .settings import settings
 import asyncio
 
 def process_query(query: str, history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
@@ -72,49 +73,85 @@ async def process_query_async(query: str, history: Optional[List[Dict[str, str]]
     context_str = ""
     try:
         t_ctx_start = time.time()
-        # Run detailed discovery in parallel
-        # Run detailed discovery in parallel
-        # We use the actual tools to get the source-of-truth
-        ctx_tasks = [
-            call_tool_async("docker_list_containers", {"all": False}),
-            call_tool_async("local_k8s_list_pods", {"namespace": "default"}),
-            call_tool_async("remote_k8s_list_nodes", {}),  # Get Remote Nodes (for names like kc-m1)
-        ]
         
-        # TIMEOUT: We give context fetching max 1.5s. If it's slower, we skip it to keep chat snappy.
-        ctx_results = await asyncio.wait_for(asyncio.gather(*ctx_tasks, return_exceptions=True), timeout=1.5)
+        # Smart Context: Only fetch relevant context based on query intent
+        # This reduces unnecessary latency and failures (e.g. if remote is offline but user wants docker)
+        q_lower = query.lower()
+        want_remote = "remote" in q_lower or "node" in q_lower # 'node' usually implies k8s/remote
+        want_local_k8s = "local" in q_lower or "pod" in q_lower or "deployment" in q_lower
+        want_docker = "docker" in q_lower or "container" in q_lower
         
-        # Parse Containers
-        containers = []
-        if isinstance(ctx_results[0], dict) and ctx_results[0].get("success"):
-            containers = [c["name"] for c in ctx_results[0].get("containers", [])]
+        # If query is generic, we might want to fetch everything or nothing.
+        # Let's say if no specific intent, we default to fetching local k8s + docker for speed, 
+        # and skip remote unless explicitly asked (as remote can be slow).
+        if not (want_remote or want_local_k8s or want_docker):
+            want_local_k8s = True
             
-        # Parse Pods
-        pods = []
-        if isinstance(ctx_results[1], dict) and ctx_results[1].get("success"):
-            pods = [p["name"] for p in ctx_results[1].get("pods", [])]
-            
-        # Parse Remote Nodes
-        nodes = []
-        if len(ctx_results) > 2 and isinstance(ctx_results[2], dict) and ctx_results[2].get("success"):
-            nodes = [n["name"] for n in ctx_results[2].get("nodes", [])]
-            
-        context_parts = []
-        if containers:
-            context_parts.append(f"Running Containers: {', '.join(containers)}")
-        if pods:
-            context_parts.append(f"Active Pods (Default): {', '.join(pods)}")
-        if nodes:
-            context_parts.append(f"Available Nodes (Remote): {', '.join(nodes)}")
-            
-        if context_parts:
-            context_str = "\n[System Context: " + " | ".join(context_parts) + "]"
-            print(f"🔎 Injected Context: {context_str}")
+        ctx_tasks = []
+        task_map = {} # Map index to type
         
-        print(f"⏱️ [PERF] Context Injection: {time.time() - t_ctx_start:.2f}s")
+        if want_docker:
+            ctx_tasks.append(call_tool_async("docker_list_containers", {"all": False}))
+            task_map[len(ctx_tasks)-1] = "docker"
+            
+        if want_local_k8s:
+            ctx_tasks.append(call_tool_async("local_k8s_list_pods", {"namespace": "default"}))
+            task_map[len(ctx_tasks)-1] = "local_k8s"
+            
+        if want_remote:
+            ctx_tasks.append(call_tool_async("remote_k8s_list_nodes", {}))  # Get Remote Nodes
+            task_map[len(ctx_tasks)-1] = "remote_k8s"
+
+        if ctx_tasks:
+            # TIMEOUT: Use configurable timeout
+            ctx_results = await asyncio.wait_for(
+                asyncio.gather(*ctx_tasks, return_exceptions=True), 
+                timeout=settings.CONTEXT_TIMEOUT
+            )
+            
+            # Parse Results based on what we requested
+            containers = []
+            pods = []
+            nodes = []
+            
+            for i, res in enumerate(ctx_results):
+                t_type = task_map.get(i)
+                
+                if isinstance(res, dict) and res.get("success"):
+                    if t_type == "docker":
+                        containers = [c["name"] for c in res.get("containers", [])]
+                    elif t_type == "local_k8s":
+                        pods = [p["name"] for p in res.get("pods", [])]
+                    elif t_type == "remote_k8s":
+                        nodes = [n["name"] for n in res.get("nodes", [])]
+                elif isinstance(res, Exception):
+                     # Log individual task failure but don't fail whole context
+                     print(f"   [Context] Task {t_type} failed: {res}")
+
+            context_parts = []
+            if containers:
+                context_parts.append(f"Running Containers: {', '.join(containers)}")
+            if pods:
+                context_parts.append(f"Active Pods (Default): {', '.join(pods)}")
+            if nodes:
+                context_parts.append(f"Available Nodes (Remote): {', '.join(nodes)}")
+                
+            if context_parts:
+                context_str = "\n[System Context: " + " | ".join(context_parts) + "]"
+                print(f"🔎 Injected Context: {context_str}")
+            
+            print(f"⏱️ [PERF] Context Injection: {time.time() - t_ctx_start:.2f}s")
+            
+    except asyncio.TimeoutError:
+         print(f"⚠️  Context injection timed out after {settings.CONTEXT_TIMEOUT}s (proceeding without it)")
             
     except Exception as e:
-        print(f"⚠️  Context injection failed (skipping): {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"⚠️  Context injection failed (skipping): {str(e)}")
+        # Only print traceback if debug needed, or if error message is empty
+        if not str(e):
+             print(f"   [Debug] No error message. Traceback:\n{error_details}")
 
     # Inject context into query
     full_query = query + context_str if context_str else query
@@ -371,8 +408,13 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
     
     # 1. Handle AI Error Interpretation (High Priority)
     # 1. Handle AI Error Interpretation (High Priority)
+    # 1. Handle AI Error Interpretation (High Priority)
     if result.get("raw_error"):
         from .agent_module import ErrorAnalyzer
+        import json
+        
+        # Pretty print the raw error for the user to see exactly what API returned
+        raw_json_str = json.dumps(result.get("raw_error"), indent=2)
         
         analyzer = ErrorAnalyzer()
         prediction = analyzer(
@@ -380,9 +422,13 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
             error_summary=result.get("error", "Unknown error"),
             raw_error=result.get("raw_error")
         )
-        return f"❌ Operation failed: {result.get('error')}\n\n🤖 **AI Explanation:**\n{prediction.explanation}"
+        return f"❌ Operation failed: {result.get('error')}\n\n🐛 **Raw API Error:**\n```json\n{raw_json_str}\n```\n\n🤖 **AI Explanation:**\n{prediction.explanation}"
 
-    # 2. Handle Success Cases
+    # 2. Handle simple error without raw details
+    if not result.get("success") and result.get("error"):
+         return f"❌ Operation failed: {result.get('error')}"
+
+    # 3. Handle Success Cases
     if result.get("success"):
         if tool_name == "docker_list_containers":
             containers = result.get("containers", [])

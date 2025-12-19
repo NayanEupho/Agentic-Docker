@@ -3,10 +3,11 @@ import json
 import os
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+from ..settings import settings
 
 # Database file path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "devops_agent.db")
+DB_FILE = os.path.join(BASE_DIR, settings.DATABASE_NAME)
 
 class SessionRepository:
     """

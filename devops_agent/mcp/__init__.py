@@ -8,12 +8,16 @@ for import from the parent package.
 """
 
 # Import key components from the MCP subpackage
-from .server import start_mcp_server
+from .docker_server import start_mcp_server
+from .local_k8s_server import start_k8s_mcp_server
+from .remote_k8s_server import start_remote_k8s_mcp_server
 from .client import call_tool, test_connection
 
 # Define what gets imported when someone does "from devops_agent.mcp import *"
 __all__ = [
     "start_mcp_server",
+    "start_k8s_mcp_server",
+    "start_remote_k8s_mcp_server",
     "call_tool", 
     "test_connection"
 ]
@@ -37,7 +41,8 @@ def get_mcp_info():
 
 # Example usage:
 """
-from devops_agent.mcp import start_mcp_server, call_tool
-start_mcp_server()  # Start the MCP server
+from devops_agent.mcp import start_mcp_server, start_k8s_mcp_server, call_tool
+start_mcp_server()  # Start the Docker MCP server
+start_k8s_mcp_server() # Start the Local K8s MCP server
 result = call_tool("docker_run_container", {"image": "nginx"})  # Call a tool
 """

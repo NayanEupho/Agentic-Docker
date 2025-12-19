@@ -12,6 +12,7 @@ class AgenticSettings(BaseSettings):
     LLM_HOST: str = "http://localhost:11434"
     LLM_TEMPERATURE: float = 0.1
     LLM_FAST_MODEL: Optional[str] = None # Defaults to LLM_MODEL if not set
+    LLM_FAST_HOST: Optional[str] = None # Defaults to LLM_HOST if not set
     
     # Server Configuration
     MCP_SERVER_HOST: str = "127.0.0.1"
@@ -21,8 +22,14 @@ class AgenticSettings(BaseSettings):
     LOCAL_K8S_PORT: int = 8081
     REMOTE_K8S_PORT: int = 8082
     
+    # Timeouts
+    CONTEXT_TIMEOUT: float = 5.0 # Seconds to wait for context injection
+    
     # Safety
     SAFETY_CONFIRM: bool = True
+    
+    # Database
+    DATABASE_NAME: str = "devops_agent.db"
     
     # Load from .env file if present
     model_config = SettingsConfigDict(

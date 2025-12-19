@@ -414,106 +414,152 @@ def start_all_servers():
     import subprocess
     import sys
     import httpx
-    from .llm.ollama_client import list_available_models
     
-    # ---------------------------------------------------------
-    # 1. HOST SELECTION (FIRST)
-    # ---------------------------------------------------------
-    typer.echo("🌐 Ollama Host Selection")
-    typer.echo("   Where is your LLM running?")
-    typer.echo("   [1] Local (localhost:11434)")
-    typer.echo("   [2] Remote / HPC")
-    
-    host_choice = typer.prompt("\n   Select an option", type=int, default=1)
-    
-    selected_host = "http://localhost:11434"
-    if host_choice == 2:
-        selected_host = typer.prompt("   Enter Remote URL", default="http://10.20.39.12:11434")
-    
-    # Validation
-    typer.echo(f"\n   🔍 Verifying connection to {selected_host}...")
-    try:
-        # Simple health check
-        r = httpx.get(f"{selected_host.rstrip('/')}/api/version", timeout=2.0)
-        if r.status_code == 200:
-             typer.echo("   ✅ Connection successful!")
-        else:
-             typer.echo(f"   ⚠️  Host reachable but returned status {r.status_code}. Proceeding anyway...")
-    except Exception as e:
-        typer.echo(f"   ❌ Could not connect to {selected_host}: {e}")
-        if not typer.confirm("   Do you want to proceed anyway?", default=False):
-            typer.echo("   Aborting start-up.")
-            raise typer.Exit(code=1)
-
-    # Save preference
-    update_env_file("DEVOPS_LLM_HOST", selected_host)
-
-    # ---------------------------------------------------------
-    # 2. MODEL SELECTION (HOT SWAP)
-    # ---------------------------------------------------------
-    typer.echo(f"\n🤖 Model Selection (Configured Host: {selected_host})")
-    try:
-        typer.echo(f"   Fetching models from {selected_host}...")
-        models = list_available_models(host=selected_host)
+    # helper for wizard flow
+    def select_provider_flow(label: str, default_host: str = "http://localhost:11434") -> tuple[str, str]:
+        """
+        Interactive wizard to select a Host and a Model.
+        Returns: (selected_host, selected_model)
+        """
+        from .llm.ollama_client import list_available_models, pull_model, check_model_access
         
-        if not models:
-            typer.echo("   ⚠️  No models found on this host.")
+        typer.echo(f"\n{label}")
+        typer.echo("   Where is this LLM running?")
+        typer.echo("   [1] Local (localhost:11434)")
+        typer.echo("   [2] Remote / HPC")
+        typer.echo("   [3] Custom URL")
+        
+        msg = "   Select Host"
+        
+        host_choice = typer.prompt(msg, default=1)
+        
+        selected_host = "http://localhost:11434"
+        if str(host_choice) == "2":
+            selected_host = typer.prompt("   Enter Remote URL", default="http://10.20.39.12:11434")
+        elif str(host_choice) == "3":
+            selected_host = typer.prompt("   Enter Custom URL", default=default_host)
         else:
-            typer.echo("\n   Available Models:")
-            models.sort()
-            for i, model in enumerate(models):
-                typer.echo(f"   [{i+1}] {model}")
-            
-            typer.echo(f"   [{len(models)+1}] Custom / Manually Enter")
+            # If they just hit enter on default=1
+            if str(host_choice) == "1":
+                 selected_host = "http://localhost:11434"
 
-            model_choice_idx = typer.prompt(f"\n   Select a Model (1-{len(models)+1})", type=int, default=1)
-            
-            if 1 <= model_choice_idx <= len(models):
-                selected_model = models[model_choice_idx-1]
-                typer.echo(f"   🎯 Selected: {selected_model}")
-                update_env_file("DEVOPS_LLM_MODEL", selected_model)
+        # Validation
+        typer.echo(f"   🔍 Verifying connection to {selected_host}...")
+        try:
+            r = httpx.get(f"{selected_host.rstrip('/')}/api/version", timeout=2.0)
+            if r.status_code == 200:
+                 typer.echo("   ✅ Connection successful!")
             else:
-                custom_model = typer.prompt("   Enter model name (e.g., llama3:latest)")
-                update_env_file("DEVOPS_LLM_MODEL", custom_model)
+                 typer.echo(f"   ⚠️  Host reachable but returned status {r.status_code}.")
+        except Exception as e:
+            typer.echo(f"   ❌ Could not connect to {selected_host}: {e}")
+            if not typer.confirm("   Do you want to proceed anyway?", default=False):
+                return None, None
+
+        # Model Loop
+        while True:
+            try:
+                typer.echo(f"\n   Fetching models from {selected_host}...")
+                models = list_available_models(host=selected_host)
+                models.sort()
                 
-    except Exception as e:
-        typer.echo(f"   ⚠️  Could not fetch models: {e}")
-        
-    typer.echo("\n✅ Primary Model Configured!")
+                typer.echo(f"\n   Available Models ({len(models)}):")
+                for i, m in enumerate(models):
+                    typer.echo(f"   [{i+1}] {m}")
+                
+                typer.echo(f"   [{len(models)+1}] ➕ Download/Pull New Model")
+                typer.echo(f"   [{len(models)+2}] Custom / Manually Enter Name")
+                
+                choice = typer.prompt(f"\n   Select Model (1-{len(models)+2})", type=int, default=1)
+                
+                if choice == len(models) + 1:
+                    # Download
+                    new_model = typer.prompt("   Enter model name to pull (e.g. llama3:8b)")
+                    if pull_model(new_model, host=selected_host):
+                        typer.echo("   Refreshing list...")
+                        continue # Loop back to list
+                    else:
+                        typer.echo("   ❌ Pull failed. Try another or check logs.")
+                        continue
+                        
+                elif choice == len(models) + 2:
+                    # Custom Manual
+                    custom_model = typer.prompt("   Enter model name manually")
+                    return selected_host, custom_model
+                    
+                elif 1 <= choice <= len(models):
+                    # Selected
+                    model = models[choice-1]
+                    
+                    # Validation check
+                    typer.echo(f"   🔍 Checking access to '{model}'...")
+                    if check_model_access(selected_host, model):
+                        typer.echo("   ✅ Verified!")
+                    else:
+                         typer.echo("   ⚠️  Model selected but seems unresponsive.")
+                    
+                    return selected_host, model
+                else:
+                     typer.echo("   Invalid choice.")
+                     
+            except Exception as e:
+                 typer.echo(f"   ⚠️ Error fetching models: {e}")
+                 if typer.confirm("   Retry?", default=True):
+                     continue
+                 else:
+                     return selected_host, typer.prompt("   Enter model name manually")
 
     # ---------------------------------------------------------
-    # 2b. FAST MODEL SELECTION (NEW)
+    # 1. SMART MODEL CONFIGURATION
+    # ---------------------------------------------------------
+    smart_host, smart_model = select_provider_flow("🤖 Smart Model Configuration (Primary)")
+    if not smart_host or not smart_model:
+        typer.echo("❌ Configuration aborted.")
+        raise typer.Exit(1)
+        
+    update_env_file("DEVOPS_LLM_HOST", smart_host)
+    update_env_file("DEVOPS_LLM_MODEL", smart_model)
+    
+    # ---------------------------------------------------------
+    # 2. FAST MODEL CONFIGURATION
     # ---------------------------------------------------------
     typer.echo(f"\n⚡ Fast Model Configuration")
-    typer.echo("   (Optional) Use a smaller model for simple queries to boost speed.")
     
-    use_fast_model = typer.confirm("   Do you want to configure a separate Fast Model?", default=False)
+    fast_host = smart_host
+    fast_model = smart_model
     
-    fast_model_val = selected_model # Default to same model (Silent Genius Mode)
-    
-    if use_fast_model:
-        typer.echo("\n   Select Fast Model:")
-        # Re-show list
-        for i, model in enumerate(models):
-             typer.echo(f"   [{i+1}] {model}")
-        typer.echo(f"   [{len(models)+1}] Custom / Manually Enter")
+    if typer.confirm("   Configure a different Fast Model? (Recommended for speed)", default=False):
+        # Check if we want to use the same host or different host
+        # Actually, let's just use the wizard. It allows selecting 'Local' easily.
         
-        fast_choice = typer.prompt(f"\n   Select Fast Model (1-{len(models)+1})", type=int, default=1)
+        # Pre-calculate default host: likely local if smart was remote
+        default_fast_host = "http://localhost:11434"
         
-        if 1 <= fast_choice <= len(models):
-            fast_model_val = models[fast_choice-1]
-        else:
-            fast_model_val = typer.prompt("   Enter fast model name (e.g., llama3.2)")
-            
-    typer.echo(f"   ⚡ Fast Model set to: {fast_model_val}")
-    update_env_file("DEVOPS_LLM_FAST_MODEL", fast_model_val)
-    
-    typer.echo("\n✅ Configuration Updated!")
+        f_host, f_model = select_provider_flow("⚡ Fast Model Setup", default_host=default_fast_host)
+        if f_host and f_model:
+            fast_host = f_host
+            fast_model = f_model
+            update_env_file("DEVOPS_LLM_FAST_HOST", fast_host)
+            update_env_file("DEVOPS_LLM_FAST_MODEL", fast_model)
+    else:
+        # Use same as smart
+        typer.echo("   -> Using same configuration as Smart Model.")
+        update_env_file("DEVOPS_LLM_FAST_HOST", "") # Empty means fallback to primary
+        update_env_file("DEVOPS_LLM_FAST_MODEL", "")
 
     # ---------------------------------------------------------
-    # 3. START SERVERS
+    # 3. SUMMARY
     # ---------------------------------------------------------
-    typer.echo("\n🚀 Starting ALL MCP Servers...")
+    typer.echo("\n" + "="*50)
+    typer.echo("✅ Configuration Complete:")
+    typer.echo(f"🧠 Smart Model: {smart_model} @ {smart_host}")
+    typer.echo(f"⚡ Fast Model:  {fast_model} @ {fast_host}")
+    typer.echo("="*50 + "\n")
+
+    # ---------------------------------------------------------
+    # 4. START SERVERS
+    # ---------------------------------------------------------
+    typer.echo("🚀 Starting ALL MCP Servers...")
     base_cmd = [sys.executable, "-m", "devops_agent.cli"]
     
     typer.echo("   • Launching Docker Server (Port 8080)...")
@@ -526,37 +572,6 @@ def start_all_servers():
     subprocess.Popen(base_cmd + ["remote-k8s-server", "--port", "8082"], creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     typer.echo("\n✨ All servers are running! Run 'devops-agent chat' to start.")
-    
-    models = list_available_models(host=selected_host)
-    
-    if not models:
-        typer.echo(f"   ⚠️  No models found on {selected_host}.")
-        typer.echo("   Using default configuration from .env")
-    else:
-        typer.echo("\n   Available Models:")
-        for idx, model in enumerate(models, 1):
-            typer.echo(f"   {idx}. {model}")
-        
-        # Default to previous choice if it's in the list
-        from .settings import settings
-        default_idx = 1
-        current_model = settings.LLM_MODEL
-        for idx, m in enumerate(models, 1):
-             if m == current_model or m.startswith(f"{current_model}:"):
-                 default_idx = idx
-                 break
-        
-        choice = typer.prompt("\n   Select a model nr for this session", type=int, default=default_idx)
-        
-        if 1 <= choice <= len(models):
-            selected_model = models[choice - 1]
-            update_env_file("DEVOPS_LLM_MODEL", selected_model)
-            typer.echo(f"   💾 Saved preference: {selected_model}")
-            
-            # Visual Confirmation
-            typer.echo(f"\n   🚀 Ready! Active Context: [Remote: {selected_model}]" if host_choice == 2 else f"\n   🚀 Ready! Active Context: [Local: {selected_model}]")
-
-    typer.echo("\n✅ All servers launched. You can now run 'devops-agent run ...'")
 
 def update_env_file(key: str, value: str):
     import os

@@ -315,14 +315,51 @@ def ensure_model_exists(force_test: bool = False) -> bool:
     except Exception as direct_test_error:
         print(f"⚠️  Direct test for model '{MODEL}' failed: {direct_test_error}")
 
-    print(f"📦 Model '{MODEL}' not found or not working. Attempting to pull from Ollama...")
-    
-    try:
-        client = get_client()
-        client.pull(MODEL)
-        print(f"✅ Model '{MODEL}' pulled successfully!")
-        return True
     except Exception as pull_error:
         print(f"❌ Failed to pull model '{MODEL}': {pull_error}")
+        return False
+
+def pull_model(model_name: str, host: str = None) -> bool:
+    """
+    Pull (download) a model from the Ollama library to the specified host.
+    """
+    try:
+        client = get_client(host=host)
+        # Note: client.pull with stream=True yields progress objects
+        # For simplicity in CLI usage, we often just want to wait, 
+        # but showing progress is better.
+        
+        current_digest = None
+        print(f"⏳ Pulling '{model_name}' to {host or settings.LLM_HOST}...")
+        
+        for progress in client.pull(model_name, stream=True):
+            status = progress.get('status')
+            digest = progress.get('digest')
+            total = progress.get('total')
+            completed = progress.get('completed')
+            
+            if digest != current_digest and digest:
+                current_digest = digest
+                # print(f"   Downloading layer: {digest[:12]}...")
+            
+            if status == "success":
+                print(f"   ✅ {status}")
+            # We could print percentage bars here if we wanted to get fancy
+            
+        print(f"✅ Successfully pulled '{model_name}'!")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to pull model '{model_name}': {e}")
+        return False
+
+def check_model_access(host: str, model_name: str) -> bool:
+    """
+    Verify that a specific model on a specific host is responding.
+    """
+    try:
+        client = get_client(host=host)
+        client.chat(model=model_name, messages=[{"role": "user", "content": "hi"}], options={"num_predict": 1})
+        return True
+    except Exception:
         return False
 
