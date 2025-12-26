@@ -108,6 +108,35 @@
             "text": "cluster metric usage",
             "tool": "remote_k8s_top_nodes",
             "args": {}
+        },
+        {
+            "text": "describe all pending pods",
+            "tool": "remote_k8s_list_pods",
+            "args": {
+                "status_phase": "Pending",
+                "limit": 100
+            },
+            "_batch_describe": true,
+            "_batch_resource_type": "pod"
+        },
+        {
+            "text": "describe every running deployment",
+            "tool": "remote_k8s_list_deployments",
+            "args": {
+                "status_phase": "Running",
+                "limit": 100
+            },
+            "_batch_describe": true,
+            "_batch_resource_type": "deployment"
+        },
+        {
+            "text": "describe all nodes",
+            "tool": "remote_k8s_list_nodes",
+            "args": {
+                "limit": 100
+            },
+            "_batch_describe": true,
+            "_batch_resource_type": "node"
         }
     ]
 }

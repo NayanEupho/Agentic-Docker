@@ -372,7 +372,18 @@ class MCPStartRequest(BaseModel):
 async def start_mcp_servers(request: MCPStartRequest):
     import sys
     import os
+    from .launcher import LOCK_FILE
     
+    # Check if managed by Supervisor
+    if os.path.exists(LOCK_FILE):
+        return {
+            "status": "managed", 
+            "message": "Servers are managed by the Supervisor (launcher). Please use the CLI console to restart if needed, or stop the supervisor first.",
+            "launched": [],
+            "already_running": ["supervisor_mode"],
+            "errors": []
+        }
+
     base_cmd = [sys.executable, "-m", "devops_agent.cli"]
     cwd = os.getcwd()
     

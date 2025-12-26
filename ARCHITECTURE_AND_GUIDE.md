@@ -149,6 +149,16 @@ The project has been hardened with a series of optimizations to achieve sub-100m
 - **Async Loops**: Background monitoring runs without blocking the main agent loop.
 - **TTL Index Pruning**: The Global Resource Map now includes a pruning mechanism that removes stale entries after 5 minutes, keeping the memory footprint minimal.
 
+### 4. Batch Describe Parallel Execution (New!)
+- **Zero-Latency Routing**: `regex_router.py` detects "describe all X" patterns and routes directly to parallel orchestration, bypassing LLM reasoning.
+- **Parallel Describe Calls**: `agent.py` uses `asyncio.gather()` to describe multiple resources simultaneously.
+- **Smart Output Formatting**: Aggregated results displayed as compact table (default) or full YAML blocks (on request).
+- **Supported Commands**:
+  - `describe all pending pods`
+  - `describe every running deployment`
+  - `describe all nodes with full details`
+  - `describe all services in kube-system`
+
 ---
 
 ## 4. Deep Dive: RAG & Tool Retrieval

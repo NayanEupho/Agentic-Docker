@@ -13,6 +13,7 @@ from typing import Dict, Any, List
 from urllib.parse import quote
 from .k8s_base import K8sTool
 from .k8s_config import k8s_config
+from .k8s_utils import safe_k8s_request
 
 class RemoteK8sListNamespacesTool(K8sTool):
     name = "remote_k8s_list_namespaces"

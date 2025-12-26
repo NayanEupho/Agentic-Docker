@@ -9,6 +9,12 @@ to communicate with the remote Kubernetes API.
 
 import os
 import sys
+import warnings
+import urllib3
+
+# Suppress SSL warnings for self-signed certs (common in K8s clusters)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 # Add the project root to the python path so we can import modules
 # This assumes the script is run from the project root or the mcp directory

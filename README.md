@@ -34,6 +34,7 @@ An AI-powered DevOps assistant that understands natural language commands. Contr
 - **Remote K8s Management:** Comprehensive management of remote Kubernetes clusters (Pods, Nodes, Deployments, Namespaces).
 - **Command Chaining:** Execute multiple actions in a single query (e.g., "Start nginx and list pods").
 - **Parallel Execution:** Independent tools are executed in parallel for faster performance.
+- **🔄 Batch Describe:** Describe all resources matching a filter in parallel (e.g., "describe all pending pods", "describe every running deployment with full details"). Zero latency routing with automatic parallel execution.
 - **Remote Ollama Support:** Connect to powerful remote LLMs (e.g., on HPC or cloud) while keeping the agent local. "Hot-swap" models instantly.
 - **High-Performance Intent Routing:**
     - **Smart Match (Regex):** Zero-latency extraction of namespaces, status phases, and resource names (~1ms) bypassing the LLM.

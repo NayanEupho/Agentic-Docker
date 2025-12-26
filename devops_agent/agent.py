@@ -572,6 +572,19 @@ async def process_query_async(query: str, history: Optional[List[Dict[str, str]]
         if i in execution_results:
             _, result = execution_results[i]
             
+            # [BATCH DESCRIBE] Post-Processor - Parallel Describe Orchestration
+            if tool_call.get("_batch_describe") and result.get("success"):
+                batch_result = await _execute_batch_describe(
+                    result=result,
+                    resource_type=tool_call.get("_batch_resource_type", "pod"),
+                    prefix=tool_call.get("_batch_prefix", "remote_k8s_"),
+                    full_detail=tool_call.get("_batch_full_detail", False),
+                    namespace=tool_call.get("arguments", {}).get("namespace", "default"),
+                    log_callback=log_callback
+                )
+                if batch_result:
+                    result = batch_result  # Replace with batch result
+            
             # [SMART CONTEXT] Auto-Memorize
             if session_id:
                 try:
@@ -623,6 +636,148 @@ async def process_query_async(query: str, history: Optional[List[Dict[str, str]]
         "output": final_output,
         "tool_calls": tool_calls
     }
+
+async def _execute_batch_describe(
+    result: Dict[str, Any],
+    resource_type: str,
+    prefix: str,
+    full_detail: bool,
+    namespace: str,
+    log_callback=None
+) -> Optional[Dict[str, Any]]:
+    """
+    Orchestrate parallel describe calls for batch describe feature.
+    Extracts names from list result, generates parallel describe calls, aggregates results.
+    """
+    from .mcp.client import call_tool_async
+    
+    # Determine which key holds the resource list
+    list_key_map = {
+        "pod": "pods",
+        "deployment": "deployments", 
+        "service": "services",
+        "node": "nodes"
+    }
+    list_key = list_key_map.get(resource_type, "pods")
+    items = result.get(list_key, [])
+    
+    if not items:
+        return None  # Nothing to describe
+    
+    # Build describe tool name
+    describe_tool = f"{prefix}describe_{resource_type}"
+    
+    # Handle tool naming inconsistencies
+    if resource_type == "service":
+        describe_tool = f"{prefix}get_service"  # Services use 'get' not 'describe'
+    
+    if log_callback:
+        log_callback("thought", f"🔄 Batch Describe: Describing {len(items)} {resource_type}s in parallel...")
+    
+    print(f"🚀 [BatchDescribe] Parallel execution: {len(items)} x {describe_tool}")
+    
+    # Build parallel tasks
+    describe_tasks = []
+    for item in items:
+        name = item.get("name")
+        if not name:
+            continue
+        
+        args = {"namespace": namespace} if resource_type != "node" else {}
+        
+        # Set the name argument based on resource type
+        if resource_type == "pod":
+            args["pod_name"] = name
+        elif resource_type == "node":
+            args["node_name"] = name
+        elif resource_type == "deployment":
+            args["deployment_name"] = name
+        elif resource_type == "service":
+            args["service_name"] = name
+        else:
+            args["name"] = name
+        
+        describe_tasks.append(call_tool_async(describe_tool, args))
+    
+    # Execute all describes in parallel
+    describe_results = await asyncio.gather(*describe_tasks, return_exceptions=True)
+    
+    # Aggregate results
+    batch_output = []
+    for i, (item, desc_result) in enumerate(zip(items, describe_results)):
+        name = item.get("name", f"Resource {i+1}")
+        status = item.get("phase", item.get("status", "Unknown"))
+        
+        if isinstance(desc_result, Exception):
+            batch_output.append({
+                "name": name,
+                "status": status,
+                "error": str(desc_result)
+            })
+        elif desc_result.get("success"):
+            # Extract relevant details based on full_detail flag
+            if full_detail:
+                # Include full describe data
+                batch_output.append({
+                    "name": name,
+                    "status": status,
+                    "details": desc_result.get("data", desc_result)
+                })
+            else:
+                # Compact summary - extract key info
+                batch_output.append({
+                    "name": name,
+                    "status": status,
+                    "events": _extract_events_summary(desc_result),
+                    "conditions": _extract_conditions_summary(desc_result)
+                })
+        else:
+            batch_output.append({
+                "name": name,
+                "status": status,
+                "error": desc_result.get("error", "Unknown error")
+            })
+    
+    return {
+        "success": True,
+        "_batch": True,
+        "_full_detail": full_detail,
+        "resource_type": resource_type,
+        "resources": batch_output,
+        "count": len(batch_output)
+    }
+
+def _extract_events_summary(result: Dict[str, Any]) -> str:
+    """Extract brief events summary from describe result."""
+    events = result.get("events", [])
+    if not events:
+        data = result.get("data", {})
+        if isinstance(data, dict):
+            events = data.get("events", [])
+    
+    if not events:
+        return "No recent events"
+    
+    # Return last 2 events as summary
+    recent = events[-2:] if len(events) > 2 else events
+    return "; ".join([e.get("message", str(e))[:50] for e in recent])
+
+def _extract_conditions_summary(result: Dict[str, Any]) -> str:
+    """Extract brief conditions summary from describe result."""
+    conditions = result.get("conditions", [])
+    if not conditions:
+        data = result.get("data", {})
+        if isinstance(data, dict):
+            conditions = data.get("conditions", [])
+    
+    if not conditions:
+        return "No conditions"
+    
+    # Return failing conditions
+    failing = [c for c in conditions if c.get("status") != "True"]
+    if failing:
+        return f"{len(failing)} issue(s): " + ", ".join([c.get("type", "Unknown") for c in failing[:3]])
+    return "All conditions healthy"
 
 def _extract_entities_from_result(tool_name: str, result: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Helper to extract memorize-able entities from tool results."""

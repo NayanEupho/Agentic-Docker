@@ -189,6 +189,20 @@ Verify the UX, real-time streaming, and visual feedback. (**URL:** `http://local
    - **Command:** `list pods labeled app=nginx`
    - *Verify:* The result table should only contain nginx pods. Check terminal logs to verify `label_selector` was passed to the MCP tool.
 
+### Scenario F: Batch Describe Parallel Execution (New!)
+1. **Zero-Latency Batch Routing:**
+   - **Command:** `describe all pending pods`
+   - *Verify:* Console log shows `⚡ [RegexRouter] Batch Describe:`; no LLM call. Response shows table with status/events/conditions.
+2. **Full Detail Mode:**
+   - **Command:** `describe every running deployment with full details`
+   - *Verify:* Output shows YAML blocks for each deployment instead of table.
+3. **Parallel Execution:**
+   - **Command:** `describe all nodes`
+   - *Verify:* Console log shows `🚀 [BatchDescribe] Parallel execution: N x remote_k8s_describe_node`. All nodes described in single response.
+4. **Namespace Filter:**
+   - **Command:** `describe all pods in kube-system`
+   - *Verify:* Only pods from kube-system namespace are described.
+
 ---
 
 ## 🛑 Troubleshooting Common Failures

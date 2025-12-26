@@ -104,4 +104,11 @@ class ContextCache:
         return self._last_mcp_map.get(session_id)
 
 # Singleton instance
-context_cache = ContextCache()
+_cache_instance = None
+def get_context_cache():
+    global _cache_instance
+    if not _cache_instance:
+        _cache_instance = ContextCache()
+    return _cache_instance
+
+context_cache = get_context_cache()

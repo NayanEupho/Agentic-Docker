@@ -165,5 +165,50 @@
                 }
             }
         ]
+    },
+    {
+        "query": "describe all pending pods in remote k8s",
+        "rationale": "The user wants to describe ALL pending pods. This is a batch describe operation. I should call 'remote_k8s_list_pods' with status_phase='Pending' to get the list, then the batch post-processor will handle parallel describes.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {
+                    "status_phase": "Pending",
+                    "limit": 100
+                },
+                "_batch_describe": true,
+                "_batch_resource_type": "pod"
+            }
+        ]
+    },
+    {
+        "query": "describe every running deployment with full details",
+        "rationale": "The user wants a batch describe of all running deployments with FULL details. I should use list_deployments and include the batch metadata with full_detail=true.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_deployments",
+                "arguments": {
+                    "status_phase": "Running",
+                    "limit": 100
+                },
+                "_batch_describe": true,
+                "_batch_resource_type": "deployment",
+                "_batch_full_detail": true
+            }
+        ]
+    },
+    {
+        "query": "describe all nodes in remote cluster",
+        "rationale": "The user wants to describe all nodes. This is a batch operation for nodes. I should use list_nodes with batch metadata.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_nodes",
+                "arguments": {
+                    "limit": 100
+                },
+                "_batch_describe": true,
+                "_batch_resource_type": "node"
+            }
+        ]
     }
 ]

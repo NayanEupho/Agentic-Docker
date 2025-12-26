@@ -13,6 +13,10 @@ class RegexRouter:
     
     # Patterns with named capture groups for automatic parameter extraction
     PATTERNS = [
+        # --- [BATCH DESCRIBE] High-Priority Pattern for "describe all X" ---
+        # Captures: describe (all/every) (status) (pods/deployments/services/nodes)
+        (re.compile(rf"describe\s+(?P<batch_all>all(?:\s+the)?|every)\s+(?P<batch_status>{PHASES_LIST})?\s*(?P<batch_remote>remote\s+)?(?P<batch_resource>pods?|deployments?|services?|nodes?)((?:\s+with\s+|\s+)(?P<batch_detail>full\s+details?|all\s+(?:the\s+)?details?|every\s+details?|verbose|detailed))?(\s+in\s+(?P<batch_ns>[\w-]+))?", re.I), "batch_describe"),
+        
         # --- Pods/Deployments/Services (Local/Remote/Namespace/Status) ---
         (re.compile(rf"(list|get|show|describe)\s+(all\s+the\s+|all\s+)?(?P<remote>remote\s+)?({PHASES}\s+)?(?P<resource_type_list>pods|deployments|services|namespaces)(\s+that\s+are\s+(?P<status_phase_alt>{PHASES_LIST}))?(\s+in\s+(?P<namespace>[\w-]+))?", re.I), "list_resources"),
         
@@ -76,6 +80,43 @@ class RegexRouter:
                     rtype = extracted.get("resource_type_list", "pods").lower()
                     prefix = "remote_k8s_" if extracted.get("remote") else "local_k8s_"
                     tool_name = f"{prefix}list_{rtype}"
+                    
+                elif base_name == "batch_describe":
+                    # --- BATCH DESCRIBE ORCHESTRATION ---
+                    # Returns a list tool call with metadata for agent post-processing
+                    rtype_raw = extracted.get("batch_resource", "pods").lower()
+                    # Normalize to plural
+                    rtype = rtype_raw if rtype_raw.endswith("s") else f"{rtype_raw}s"
+                    
+                    prefix = "remote_k8s_" if extracted.get("batch_remote") else "local_k8s_"
+                    list_tool = f"{prefix}list_{rtype}"
+                    
+                    args = {"limit": 100}  # High limit for batch
+                    
+                    # Status filter
+                    if extracted.get("batch_status"):
+                        args["status_phase"] = extracted["batch_status"].capitalize()
+                    
+                    # Namespace
+                    if extracted.get("batch_ns"):
+                        args["namespace"] = extracted["batch_ns"]
+                    elif rtype in ["pods", "deployments", "services"]:
+                        args["namespace"] = "default"
+                    
+                    # Detect detail level
+                    full_detail = bool(extracted.get("batch_detail"))
+                    
+                    # Return with batch metadata for agent post-processor
+                    print(f"⚡ [RegexRouter] Batch Describe: '{query}' -> {list_tool}({args}) [detail={full_detail}]")
+                    return [{
+                        "name": list_tool,
+                        "arguments": args,
+                        "_batch_describe": True,
+                        "_batch_resource_type": rtype_raw.rstrip("s"),  # Singular for describe tool
+                        "_batch_full_detail": full_detail,
+                        "_batch_prefix": prefix
+                    }]
+                    
                 elif base_name == "describe_resource":
                     rtype = extracted.get("res_type_detail", "pod").lower()
                     prefix = "remote_k8s_" if extracted.get("remote_detail") else "local_k8s_"

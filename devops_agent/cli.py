@@ -403,8 +403,7 @@ def start_remote_k8s_server_cmd(host: str = "0.0.0.0", port: int = 8082):
 
 @app.command(name="start-all")
 def start_all_servers():
-    """Start all 3 MCP servers in separate console windows."""
-    import subprocess
+    """Start all 3 MCP servers + API server (Supervisor Mode)."""
     import sys
     import httpx
     
@@ -522,9 +521,6 @@ def start_all_servers():
     fast_model = smart_model
     
     if typer.confirm("   Configure a different Fast Model? (Recommended for speed)", default=False):
-        # Check if we want to use the same host or different host
-        # Actually, let's just use the wizard. It allows selecting 'Local' easily.
-        
         # Pre-calculate default host: likely local if smart was remote
         default_fast_host = "http://localhost:11434"
         
@@ -574,7 +570,7 @@ def start_all_servers():
     typer.echo("="*50 + "\n")
 
     # ---------------------------------------------------------
-    # 4. SYNC TOOL INDEX (Auto-generate embeddings + templates)
+    # 5. SYNC TOOL INDEX (Auto-generate embeddings + templates)
     # ---------------------------------------------------------
     typer.echo("🔄 Syncing tool index (auto-generating embeddings & templates)...")
     try:
@@ -585,26 +581,11 @@ def start_all_servers():
         typer.echo(f"   ⚠️  Tool indexing skipped: {e}")
     
     # ---------------------------------------------------------
-    # 5. START SERVERS
+    # 6. START SERVERS (Supervisor Mode)
     # ---------------------------------------------------------
-    typer.echo("🚀 Starting ALL MCP Servers...")
-    base_cmd = [sys.executable, "-m", "devops_agent.cli"]
-    
-    typer.echo("   • Launching Docker Server (Port 8080)...")
-    subprocess.Popen(base_cmd + ["server", "--port", "8080"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    
-    typer.echo("   • Launching Local K8s Server (Port 8081)...")
-    subprocess.Popen(base_cmd + ["k8s-server", "--port", "8081"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    
-    typer.echo("   • Launching Remote K8s Server (Port 8082)...")
-    subprocess.Popen(base_cmd + ["remote-k8s-server", "--port", "8082"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-    
-    typer.echo("   • Launching API Server (Port 8088)...")
-    subprocess.Popen([sys.executable, "-m", "devops_agent.api_server"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-
-    typer.echo("\n✨ All servers are running!")
-    typer.echo("   🌐 Web UI: cd ui && bun run dev")
-    typer.echo("   💬 CLI:    devops-agent chat")
+    from .launcher import AgentLauncher
+    launcher = AgentLauncher()
+    launcher.start_all()
 
 def update_env_file(key: str, value: str):
     import os

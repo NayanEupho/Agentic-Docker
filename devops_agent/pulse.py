@@ -4,7 +4,6 @@ import time
 import json
 import os
 from typing import Dict, Any, List, Optional
-from .mcp.client import MCPClient
 from .settings import settings
 
 class InfrastructurePulse:
@@ -27,21 +26,28 @@ class InfrastructurePulse:
             "k8s_remote": {"status": "unknown", "data": {}, "last_check": 0},
             "llm": {"status": "unknown", "last_check": 0},
             "embeddings": {"status": "unknown", "last_check": 0},
-            "global_index": {"resources": {}, "last_check": 0}
+            "global_index": {"status": "ok", "resources": {}, "last_check": 0}
         }
+
         self._running = False
         self._task = None
 
     async def start(self):
-        """Start the background pulse tasks."""
-        if self._running:
-            return
+        """Start the background monitoring loop."""
+        if self._running: return
         self._running = True
+        
+        # Ensure we don't crash on Windows consoles that don't support emojis
+        try:
+            print("💓 [InfrastructurePulse] Started.")
+        except UnicodeEncodeError:
+            print("[InfrastructurePulse] Started.")
+            
         self._task = asyncio.create_task(self._pulse_loop())
-        print("💓 [InfrastructurePulse] Started.")
 
     async def stop(self):
-        """Stop the background pulse tasks."""
+        """Stop the background loop."""
+        if not self._running: return
         self._running = False
         if self._task:
             self._task.cancel()
@@ -49,7 +55,11 @@ class InfrastructurePulse:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        print("💓 [InfrastructurePulse] Stopped.")
+        
+        try:
+            print("💓 [InfrastructurePulse] Stopped.")
+        except UnicodeEncodeError:
+            print("[InfrastructurePulse] Stopped.")
 
     async def _pulse_loop(self):
         while self._running:
@@ -216,8 +226,8 @@ class InfrastructurePulse:
         """Returns a string description of infrastructure health for LLM context."""
         summary = ["--- Infrastructure Pulse ---"]
         for provider, info in self.status_cache.items():
-            status = info["status"]
-            last = int(time.time() - info["last_check"]) if info["last_check"] > 0 else "never"
+            status = info.get("status", "unknown")  # Safe access with fallback
+            last = int(time.time() - info["last_check"]) if info.get("last_check", 0) > 0 else "never"
             summary.append(f"- {provider.upper()}: {status} (Checked {last}s ago)")
             
             # If connected, add brief stats

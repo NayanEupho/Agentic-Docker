@@ -221,22 +221,29 @@ export default function Chat({ sessionId }: ChatProps) {
 
                 for (const line of lines) {
                     if (line.startsWith("event:")) {
-                        const match = line.match(/event: (.*)\ndata: (.*)/s);
+                        const match = line.match(/event: (.*)[\r\n]+data: (.*)/s);
                         if (match) {
                             const [_, eventType, dataStr] = match;
                             const type = eventType.trim();
                             const data = dataStr.trim();
 
                             if (type === "token") {
-                                const json = JSON.parse(data);
-                                assistantMsg.content += json.token;
-                                setMessages(prev => {
-                                    const next = [...prev];
-                                    next[next.length - 1] = { ...assistantMsg };
-                                    return next;
-                                });
+                                try {
+                                    const json = JSON.parse(data);
+                                    assistantMsg.content += json.token;
+                                    setMessages(prev => {
+                                        const next = [...prev];
+                                        next[next.length - 1] = { ...assistantMsg };
+                                        return next;
+                                    });
+                                } catch (e) {
+                                    console.warn("Failed to parse token:", data);
+                                }
                             } else if (["thought", "status", "tool_call", "error", "result"].includes(type)) {
-                                setActiveThoughts(prev => [...prev, { type: type as any, content: data }]);
+                                // Only add if data is non-empty to avoid showing spurious entries
+                                if (data && data.length > 0) {
+                                    setActiveThoughts(prev => [...prev, { type: type as any, content: data }]);
+                                }
                             } else if (type === "confirmation_request") {
                                 const req = JSON.parse(data);
                                 setConfirmationReq(req);
